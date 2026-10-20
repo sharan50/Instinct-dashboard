@@ -1,0 +1,31 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Tests in other timezones
+        run: npm run test:tz
+      # Built without settings, the site shows its setup screen. That is expected here.
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Browser tests (Google is faked, no real data)
+        run: npm run test:e2e
