@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.56 (matching the browsers used for local testing) can't install on newer Ubuntu images.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
