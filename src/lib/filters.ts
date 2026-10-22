@@ -19,18 +19,18 @@ export function countByStatus(tasks: readonly Task[]): Record<StatusKey, number>
   return counts;
 }
 
-/** Every word of the query must appear in the Task ID, task name or notes (any case). */
+/** Every word of the query must appear in the Task ID, task name, notes or links (any case). */
 export function matchesSearch(task: Task, query: string): boolean {
   const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return true;
-  const text = `${task.id}\n${task.title}\n${task.notes}`.toLocaleLowerCase();
+  const text = `${task.id}\n${task.title}\n${task.notes}\n${task.rawLinks}`.toLocaleLowerCase();
   return terms.every((term) => text.includes(term));
 }
 
 /** True when the query matches the notes but not the Task ID or name, so the match is hidden while notes are collapsed. */
 export function matchesOnlyInNotes(task: Task, query: string): boolean {
   if (!query.trim()) return false;
-  return matchesSearch({ ...task, notes: '' }, query) === false && matchesSearch(task, query);
+  return matchesSearch({ ...task, notes: '', rawLinks: '' }, query) === false && matchesSearch({ ...task, rawLinks: '' }, query);
 }
 
 export function filterTasks(

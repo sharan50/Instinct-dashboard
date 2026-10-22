@@ -4,7 +4,7 @@ A private, read-only dashboard for the **Tasks** tab of your Google Sheets task 
 phone first (it works from 360 px wide), and on a wide screen it shows a table.
 
 - You sign in with Google in your browser. Google gives the page a short-lived, **read-only** pass
-  ("access token") for your spreadsheets. The page then reads `Tasks!A1:F1000` and nothing else.
+  ("access token") for your spreadsheets. The page then reads `Tasks!A1:Z1000` and nothing else.
 - The sheet stays private. Its sharing never needs to change.
 - There is no server, no database, no client secret, no API key and no service account. The site is just
   files (HTML, CSS, JavaScript) that Netlify or GitHub Pages serves.
@@ -26,6 +26,8 @@ phone first (it works from 360 px wide), and on a wide screen it shows a table.
 - **Search** across Task ID, task name and notes.
 - Two views. **All tasks** is sorted by deadline, earliest first, with blank deadlines last. **Deadlines** groups
   tasks into Overdue, Next 7 days, Later, Ongoing (no fixed date) and No deadline.
+- **Links** from the sheet's Links column (documents and other work delivered for a task) show on each
+  task as buttons that open in a new tab. Search covers them too.
 - **Notes** are folded away so the phone view stays short; tap **Show notes**. Notes are shown as plain text.
   Web addresses starting with `https://` become links.
 - **Freshness**, always visible at the top of the screen:
@@ -223,10 +225,13 @@ Google Sheets (or let Instinct update it). The change shows in the dashboard aft
 these rules so every row reads correctly:
 
 - Row 1 holds exactly these headers, in any order: `Task ID`, `Task`, `Status`, `Deadline`, `Last update`, `Notes`.
+  An optional `Links` column holds links to work delivered for the task.
 - **Task ID** is unique per row, for example `T034`. Never reuse an ID.
 - **Status** is one of: `open`, `waiting on you`, `waiting on someone else`, `done`.
 - **Deadline** is `YYYY-MM-DD` (for example `2026-10-29`) or blank. Blank means "no confirmed deadline", not overdue.
 - **Last update** is an ISO 8601 timestamp with a timezone offset, for example `2026-10-21T09:00:00+05:30`.
+- **Links** (optional): one or more `Label: https://…` entries separated by `;`, for example
+  `Comparison: https://… ; Earlier draft (superseded): https://…`. Each one shows as a button on the task.
 - Don't rename the **Tasks** tab. Rows below row 1000 are not read (the dashboard warns if row 1000 is used).
 - Don't put passwords, ID documents, card details or bank account numbers in the sheet.
 
@@ -325,7 +330,7 @@ The dashboard uses private browser sign-in on purpose. For completeness:
 - Stack: TypeScript, React 19, Vite, Vitest + Testing Library, Playwright + axe-core. No runtime dependencies
   besides React.
 - `src/lib/sheetsApi.ts`: the single read-only request
-  (`GET …/values/Tasks!A1%3AF1000?valueRenderOption=FORMATTED_VALUE` with a Bearer token, no cookies, no HTTP
+  (`GET …/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE` with a Bearer token, no cookies, no HTTP
   cache), error mapping, and retries with exponential backoff and jitter.
 - `src/lib/tasks.ts`: maps columns by header name, pads missing trailing cells, skips blank rows, and reports
   missing or duplicate headers, unknown statuses, bad dates and duplicate IDs.

@@ -137,3 +137,26 @@ export function Notes({
     </div>
   );
 }
+
+/** Work delivered for the task (the sheet's "Links" column), always visible. */
+export function TaskLinks({ task }: { task: Task }) {
+  if (task.links.length === 0) return null;
+  return (
+    <ul className="task-links" aria-label={`Links for ${task.title || task.id}`}>
+      {task.links.map((link, index) => (
+        <li key={index}>
+          {link.href ? (
+            <a href={link.href} target="_blank" rel="noopener noreferrer">
+              <span aria-hidden="true" className="task-links__icon">
+                ↗
+              </span>
+              {link.label}
+            </a>
+          ) : (
+            <span className="muted">{link.label}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}

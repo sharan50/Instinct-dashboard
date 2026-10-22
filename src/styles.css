@@ -810,6 +810,45 @@ code {
   white-space: normal;
 }
 
+/* Links to delivered work */
+
+.task-links {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.task-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 36px;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid #a5d5ce;
+  border-radius: 999px;
+  background: var(--teal-softer);
+  color: var(--teal-dark);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.task-links a:hover {
+  background: var(--teal-soft);
+  text-decoration: underline;
+}
+
+.task-links .muted {
+  font-size: 0.9rem;
+}
+
+.task-table .task-links {
+  margin-top: 0.4rem;
+  font-weight: 400;
+}
+
 /* Notes */
 
 .notes {

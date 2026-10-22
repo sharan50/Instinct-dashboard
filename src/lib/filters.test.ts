@@ -31,6 +31,8 @@ function task(overrides: Partial<Task>): Task {
     lastUpdate: null,
     rawLastUpdate: '',
     notes: '',
+    links: [],
+    rawLinks: '',
     ongoing: false,
     ...overrides,
   };

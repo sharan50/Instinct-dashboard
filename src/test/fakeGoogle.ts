@@ -80,7 +80,7 @@ export type FakeGoogle = ReturnType<typeof createFakeGoogle>;
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export function valuesResponse(values: unknown[]): Response {
-  return new Response(JSON.stringify({ range: 'Tasks!A1:F1000', majorDimension: 'ROWS', values }), {
+  return new Response(JSON.stringify({ range: 'Tasks!A1:Z1000', majorDimension: 'ROWS', values }), {
     status: 200,
     headers: JSON_HEADERS,
   });

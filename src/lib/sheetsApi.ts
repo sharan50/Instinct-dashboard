@@ -7,7 +7,7 @@
 export const SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
 /** Only the Tasks tab is read. Other tabs (such as "Dashboard prompt" or "Read me") never are. */
-export const TASKS_RANGE = 'Tasks!A1:F1000';
+export const TASKS_RANGE = 'Tasks!A1:Z1000';
 
 export type SheetsErrorKind =
   | 'auth-expired'

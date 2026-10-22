@@ -139,6 +139,24 @@ describe('parseTaskSheet', () => {
     ]);
     expect(tasks.map((t) => t.ongoing)).toEqual([true, true, false, false]);
   });
+
+  it('reads the optional Links column, and works without it', () => {
+    const { tasks } = parseTaskSheet([
+      [...HEADER, 'Links'],
+      ['T1', 'With links', 'done', '', '', '', 'Comparison: https://example.org/c ; Old: https://example.org/o'],
+      ['T2', 'Without links', 'open'],
+    ]);
+    expect(tasks[0]?.links).toEqual([
+      { label: 'Comparison', href: 'https://example.org/c' },
+      { label: 'Old', href: 'https://example.org/o' },
+    ]);
+    expect(tasks[1]?.links).toEqual([]);
+    expect(parseTaskSheet(sampleValues()).tasks[0]?.links).toEqual([]);
+  });
+
+  it('explains a duplicated Links column', () => {
+    expect(formatError([[...HEADER, 'Links', 'links']]).details).toContain('“Links” appears more than once (columns G and H).');
+  });
 });
 
 describe('columnLetter', () => {

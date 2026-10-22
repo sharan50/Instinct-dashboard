@@ -15,14 +15,14 @@ export function isoDate(days: number): string {
 export function sampleValues(): string[][] {
   const stamp = new Date(Date.now() - 2 * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
   return [
-    ['Task ID', 'Task', 'Status', 'Deadline', 'Last update', 'Notes'],
-    ['T001', 'Renew library card', 'open', isoDate(8), stamp, 'Bring proof of address. Opening hours: https://example.org/library/hours.'],
+    ['Task ID', 'Task', 'Status', 'Deadline', 'Last update', 'Notes', 'Links'],
+    ['T001', 'Renew library card', 'open', isoDate(8), stamp, 'Bring proof of address. Opening hours: https://example.org/library/hours.', 'Checklist: https://example.org/library/checklist'],
     ['T002', 'Book dentist check-up', 'waiting on you', '', stamp, 'Choose a morning slot from the three offered.'],
     ['T003', 'Plumber quote for the kitchen tap', 'waiting on someone else', isoDate(-3), stamp, 'Asked for a written quote; no reply yet.'],
     ['T004', 'Return borrowed camera', 'done', isoDate(-10), stamp, 'Returned in person.'],
     ['T005', 'Water the balcony plants', 'open', '', stamp, 'Ongoing: every Sunday morning.'],
     ['T006', 'Order new passport photos', 'waiting on you', isoDate(2), stamp],
-    ['T007', 'Compare broadband offers before the contract ends', 'open', isoDate(40), stamp, 'Shortlist: three providers. A very-long-unbroken-reference-code-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-should-wrap.'],
+    ['T007', 'Compare broadband offers before the contract ends', 'open', isoDate(40), stamp, 'Shortlist: three providers. A very-long-unbroken-reference-code-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-should-wrap.', 'Comparison: https://example.org/broadband/comparison-with-a-very-long-address-that-must-wrap-on-phones ; Earlier draft (superseded): https://example.org/broadband/old'],
     ['T008', 'Check the <b>markup</b> stays text', 'waiting on you', '', stamp, '<img src=x onerror="window.__xss=1"> stays as text.'],
   ];
 }
@@ -56,7 +56,7 @@ export async function mockGoogle(
       status: reply?.status ?? 200,
       contentType: 'application/json',
       headers: cors,
-      body: JSON.stringify(reply?.body ?? { range: 'Tasks!A1:F1000', majorDimension: 'ROWS', values: sampleValues() }),
+      body: JSON.stringify(reply?.body ?? { range: 'Tasks!A1:Z1000', majorDimension: 'ROWS', values: sampleValues() }),
     });
   });
   return { sheetRequests };
