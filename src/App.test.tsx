@@ -111,7 +111,7 @@ describe('connecting', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(fetchImpl).mock.calls[0] ?? [];
     expect(url).toBe(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Tasks!A1%3AF1000?valueRenderOption=FORMATTED_VALUE`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE`,
     );
     expect(init?.headers).toMatchObject({ Authorization: 'Bearer token-1' });
   });
@@ -287,6 +287,24 @@ describe('showing tasks', () => {
     expect(screen.getByText(/<img src=x onerror="alert\(1\)"> <b>bold<\/b> see/)).toBeInTheDocument();
     expect(container.querySelector('img, b')).toBeNull();
     expect(screen.getByRole('link', { name: 'https://example.org/x' })).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('shows each task’s links from the Links column, and finds them by search', async () => {
+    const values = [
+      [...HEADER, 'Links'],
+      ['T1', 'Holiday comparison', 'done', '', '', 'Delivered.', 'Comparison: https://example.org/c ; Earlier draft: https://example.org/d'],
+      ['T2', 'No links here', 'open'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(within(screen.getByRole('article', { name: 'No links here' })).queryByRole('list', { name: /Links/ })).toBeNull();
+
+    await user.type(screen.getByRole('searchbox'), 'earlier draft');
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    const card = screen.getByRole('article', { name: 'Holiday comparison' });
+    const links = within(card).getByRole('list', { name: 'Links for Holiday comparison' });
+    expect(within(links).getByRole('link', { name: 'Comparison' })).toHaveAttribute('href', 'https://example.org/c');
+    expect(within(links).getByRole('link', { name: 'Earlier draft' })).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('lists problems in the sheet without hiding the rows', async () => {

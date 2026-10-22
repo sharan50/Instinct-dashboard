@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { CalendarDate } from '../lib/dates.ts';
 import { groupByDeadline, matchesOnlyInNotes } from '../lib/filters.ts';
 import type { Task } from '../lib/tasks.ts';
-import { DeadlineInfo, LastUpdate, Notes, StatusBadge } from './TaskParts.tsx';
+import { DeadlineInfo, LastUpdate, Notes, StatusBadge, TaskLinks } from './TaskParts.tsx';
 
 export interface TaskViewProps {
   tasks: Task[];
@@ -41,6 +41,7 @@ export function TaskCard({ task, today, now, query, expanded, onToggleNotes }: C
           </dd>
         </div>
       </dl>
+      <TaskLinks task={task} />
       <Notes
         task={task}
         expanded={expanded.has(task.key)}
@@ -92,8 +93,9 @@ export function TaskTable({ tasks, today, now, query, expanded, onToggleNotes }:
           <tr key={task.key} className={task.status === 'done' ? 'row--done' : undefined}>
             <td className="task-id">{task.id || `Row ${task.rowNumber}`}</td>
             <th scope="row" className="task-title-cell">
-              {task.title || '(No task name)'}
+              <span>{task.title || '(No task name)'}</span>
               {task.ongoing ? <span className="badge badge--ongoing">Ongoing</span> : null}
+              <TaskLinks task={task} />
             </th>
             <td>
               <StatusBadge task={task} />

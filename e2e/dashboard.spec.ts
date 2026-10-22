@@ -42,7 +42,7 @@ test('connects, shows tasks and never needs sideways scrolling', async ({ page }
   await expect(page.getByText('Synced with your sheet')).toBeVisible();
   await expect(page.getByText('Showing 7 of 8 tasks')).toBeVisible();
   expect(sheetRequests).toEqual([
-    'https://sheets.googleapis.com/v4/spreadsheets/test-spreadsheet-id-not-real-000000/values/Tasks!A1%3AF1000?valueRenderOption=FORMATTED_VALUE Bearer fake-token',
+    'https://sheets.googleapis.com/v4/spreadsheets/test-spreadsheet-id-not-real-000000/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE Bearer fake-token',
   ]);
   const requests = await page.evaluate(() => (window as unknown as { __FAKE_GIS_REQUESTS__: unknown[] }).__FAKE_GIS_REQUESTS__);
   expect(requests).toEqual([
@@ -130,6 +130,16 @@ test('shows notes and names as plain text', async ({ page }) => {
   await expect(page.getByText('<img src=x onerror="window.__xss=1"> stays as text.')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
   await expect(page.locator('main img, main b')).toHaveCount(0);
+});
+
+test('shows links from the Links column as buttons that open in a new tab', async ({ page }) => {
+  await mockGoogle(page);
+  await connect(page);
+  const link = page.getByRole('link', { name: 'Earlier draft (superseded)' });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('href', 'https://example.org/broadband/old');
+  expect(await hasHorizontalScroll(page)).toBe(false);
 });
 
 test('explains a refused Google consent screen', async ({ page }) => {

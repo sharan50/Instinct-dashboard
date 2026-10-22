@@ -37,3 +37,43 @@ export function splitLinks(text: string): NotePart[] {
   if (last < text.length) parts.push({ type: 'text', text: text.slice(last) });
   return parts;
 }
+
+/** One entry of the "Links" column: a label and, when the entry has a usable https address, the link. */
+export interface TaskLink {
+  label: string;
+  href: string | null;
+}
+
+/**
+ * Reads the "Links" column. Entries are separated by ";" or new lines and are
+ * usually written as "Label: https://…" (for example
+ * "Shortlist: https://… ; earlier page (superseded): https://…"). An entry
+ * without a label is named after the site it points to; an entry without an
+ * https address is kept as plain text.
+ */
+export function parseLinks(text: string): TaskLink[] {
+  const links: TaskLink[] = [];
+  for (const entry of text.split(/;|\n/)) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const parts = splitLinks(trimmed);
+    const urls = parts.filter((part) => part.type === 'link');
+    if (urls.length === 0) {
+      links.push({ label: trimmed, href: null });
+      continue;
+    }
+    const firstUrl = parts.findIndex((part) => part.type === 'link');
+    const label = parts
+      .slice(0, firstUrl)
+      .map((part) => part.text)
+      .join('')
+      .replace(/[\s:–—-]+$/, '')
+      .trim();
+    urls.forEach((url, index) => {
+      const site = new URL(url.href).hostname.replace(/^www\./, '');
+      const name = label || site;
+      links.push({ label: urls.length > 1 ? `${name} (${index + 1})` : name, href: url.href });
+    });
+  }
+  return links;
+}

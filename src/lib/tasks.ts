@@ -1,4 +1,5 @@
 import { parseCalendarDate, parseTimestamp, type CalendarDate } from './dates.ts';
+import { parseLinks, type TaskLink } from './linkify.ts';
 
 /**
  * The data contract with the "Tasks" tab of the tracker sheet.
@@ -28,8 +29,15 @@ export const COLUMNS = {
   notes: 'Notes',
 } as const;
 
+/** Columns the dashboard uses when present, but doesn't require. */
+export const OPTIONAL_COLUMNS = {
+  links: 'Links',
+} as const;
+
 type Field = keyof typeof COLUMNS;
+type OptionalField = keyof typeof OPTIONAL_COLUMNS;
 const FIELDS = Object.keys(COLUMNS) as Field[];
+const OPTIONAL_FIELDS = Object.keys(OPTIONAL_COLUMNS) as OptionalField[];
 
 /** The sheet range the dashboard reads; rows past it are invisible to the dashboard. */
 export const LAST_ROW_READ = 1000;
@@ -49,6 +57,9 @@ export interface Task {
   lastUpdate: Date | null;
   rawLastUpdate: string;
   notes: string;
+  /** Links to work delivered for the task (the optional "Links" column). */
+  links: TaskLink[];
+  rawLinks: string;
   /** Notes that start with "Ongoing" mark continuing work without a fixed date. */
   ongoing: boolean;
 }
@@ -116,23 +127,28 @@ export function parseStatus(raw: string): Status | null {
   return STATUSES.find((status) => status === normalized) ?? null;
 }
 
-function mapHeaders(headerRow: unknown[]): Record<Field, number> {
+type ColumnIndexes = Record<Field, number> & Partial<Record<OptionalField, number>>;
+
+function mapHeaders(headerRow: unknown[]): ColumnIndexes {
   const labels = headerRow.map((cell) => normalizeLabel(cellText(cell)));
   const problems: string[] = [];
-  const indexes: Partial<Record<Field, number>> = {};
+  const indexes: Partial<ColumnIndexes> = {};
 
-  for (const field of FIELDS) {
-    const wanted = normalizeLabel(COLUMNS[field]);
+  const find = (name: string, required: boolean): number | undefined => {
+    const wanted = normalizeLabel(name);
     const found = labels.flatMap((label, index) => (label === wanted ? [index] : []));
     if (found.length === 0) {
-      problems.push(`Missing column: “${COLUMNS[field]}”.`);
+      if (required) problems.push(`Missing column: “${name}”.`);
     } else if (found.length > 1) {
       const where = found.map((index) => columnLetter(index)).join(' and ');
-      problems.push(`“${COLUMNS[field]}” appears more than once (columns ${where}).`);
+      problems.push(`“${name}” appears more than once (columns ${where}).`);
     } else {
-      indexes[field] = found[0];
+      return found[0];
     }
-  }
+    return undefined;
+  };
+  for (const field of FIELDS) indexes[field] = find(COLUMNS[field], true);
+  for (const field of OPTIONAL_FIELDS) indexes[field] = find(OPTIONAL_COLUMNS[field], false);
 
   if (problems.length > 0) {
     const present = headerRow.map(cellText).filter(Boolean);
@@ -142,7 +158,7 @@ function mapHeaders(headerRow: unknown[]): Record<Field, number> {
     );
     throw new SheetFormatError('The header row of the Tasks tab does not match what the dashboard expects.', problems);
   }
-  return indexes as Record<Field, number>;
+  return indexes as ColumnIndexes;
 }
 
 /**
@@ -167,7 +183,10 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
   rows.slice(1).forEach((row, index) => {
     const rowNumber = index + 2;
     if (row.every((cell) => cellText(cell) === '')) return;
-    const cell = (field: Field) => cellText(row[columns[field]]);
+    const cell = (field: Field | OptionalField) => {
+      const index = columns[field];
+      return index === undefined ? '' : cellText(row[index]);
+    };
 
     const id = cell('id');
     const title = cell('title');
@@ -175,6 +194,7 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
     const rawDeadline = cell('deadline');
     const rawLastUpdate = cell('lastUpdate');
     const notes = cell('notes');
+    const rawLinks = cell('links');
     const label = id ? `Row ${rowNumber} (${id})` : `Row ${rowNumber}`;
 
     if (!id) issues.push({ kind: 'missing-id', rowNumber, message: `${label} has no Task ID.` });
@@ -221,6 +241,8 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
       lastUpdate,
       rawLastUpdate,
       notes,
+      links: parseLinks(rawLinks),
+      rawLinks,
       ongoing: ONGOING.test(notes),
     });
   });

@@ -46,14 +46,14 @@ async function failure(promise: Promise<unknown>): Promise<SheetsApiError> {
 describe('buildValuesUrl', () => {
   it('asks for only the Tasks tab, as formatted values', () => {
     expect(buildValuesUrl(SHEET_ID)).toBe(
-      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Tasks!A1%3AF1000?valueRenderOption=FORMATTED_VALUE`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE`,
     );
   });
 });
 
 describe('fetchSheetValues', () => {
   it('sends the token as a Bearer header without cookies or caching', async () => {
-    const { fetchImpl, run } = setup([json(200, { range: 'Tasks!A1:F1000', majorDimension: 'ROWS', values: [['a']] })]);
+    const { fetchImpl, run } = setup([json(200, { range: 'Tasks!A1:Z1000', majorDimension: 'ROWS', values: [['a']] })]);
     await expect(run()).resolves.toEqual([['a']]);
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(url).toBe(buildValuesUrl(SHEET_ID));
@@ -66,7 +66,7 @@ describe('fetchSheetValues', () => {
   });
 
   it('returns no rows when the range is empty', async () => {
-    const { run } = setup([json(200, { range: 'Tasks!A1:F1000', majorDimension: 'ROWS' })]);
+    const { run } = setup([json(200, { range: 'Tasks!A1:Z1000', majorDimension: 'ROWS' })]);
     await expect(run()).resolves.toEqual([]);
   });
 
@@ -87,7 +87,7 @@ describe('fetchSheetValues', () => {
       'scope-missing',
     ],
     [googleError(404, 'NOT_FOUND', 'Requested entity was not found.'), 'not-found'],
-    [googleError(400, 'INVALID_ARGUMENT', 'Unable to parse range: Tasks!A1:F1000'), 'tab-missing'],
+    [googleError(400, 'INVALID_ARGUMENT', 'Unable to parse range: Tasks!A1:Z1000'), 'tab-missing'],
     [googleError(400, 'INVALID_ARGUMENT', 'Something else'), 'unknown'],
   ])('does not retry %#: %s', async (response, kind) => {
     const { fetchImpl, run } = setup([response]);
