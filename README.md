@@ -285,14 +285,27 @@ Financial priority is the default order of the list. It uses only structured cel
 2. **Then the date, inside each of those groups.** Verified dates first, earliest first (so dates that have passed
    lead). Then planning or unknown dates, earliest first. Then tasks with no date, in sheet order. A planning or
    unknown date never outranks a verified one, however early it is.
-3. **One exception.** An `opportunity` task whose **verified** date has passed or is within 7 days goes above
+3. **One fixed rule.** An `opportunity` task whose **verified** date is today or within the next 7 days goes above
    `avoidable charge` and `deadline` tasks that have no verified date. So a basis without a checked date never
-   buries a checked date that is close.
+   buries a checked date that is close. Once that date has passed, the task drops back to its place among the
+   opportunity tasks: a date in the past never moves a task across tiers, so nothing stays urgent forever.
 4. **Done tasks**, when you tick Done, come last.
 
-Each task says why it sits where it does, for example "Avoidable charge, recorded date in 3 days (not verified)",
-"Avoidable charge, no date recorded" or "Opportunity, recorded date in 2 days (verified). Moved up because its
-verified date is within 7 days."
+Each task says why it sits where it does, for example:
+
+- "Avoidable charge, recorded date in 3 days (not verified)"
+- "Avoidable charge, no date recorded"
+- "Opportunity, recorded date in 2 days (verified). Moved up by the fixed 7-day rule: its verified date is within
+  7 days."
+- "Opportunity, recorded date 3 days ago (verified). The date has passed; the dashboard does not know whether a
+  consequence applies now."
+
+**This is a fixed rule, not a ranking by size.** The dashboard cannot compare amounts, currencies or the real cost
+of an opportunity. The order reflects only three things: the basis label, the recorded date, and whether that date
+is verified. The 7-day window is an arbitrary fixed threshold: day 7 moves a task up and day 8 does not, whatever is
+at stake. A small opportunity with a verified date next week goes above a large avoidable charge that has no
+verified date, because the dashboard has no way to weigh them. Read the order as a sorted list of the sheet's own
+labels, and use your own judgement for what matters most.
 
 What it never does:
 
@@ -301,12 +314,17 @@ What it never does:
 - It never guesses a date. A task without one says "no date recorded".
 - It never treats the basis or a date as proof. They are what the sheet says, and the dashboard can't check that a
   charge is real or that a date is enforced. Neither a date nor a Money at stake entry is shown as a verified loss.
+- It never treats a date that has passed as a missed one. A passed date, verified or not, is shown as a date in
+  the past, in the same amber as other notes and never as an alarm. For a verified one the task says the date has
+  passed and that the dashboard does not know whether a consequence applies now.
 
 **Urgency needs the `Date verified` column.** The Deadline column holds recorded dates that may be planning or
 check dates, so a date alone never makes a task urgent here. Until the sheet has a `Date verified` column with
 `verified` on the dates that were checked against their source, no date counts as verified: tasks are still
 ordered by basis and then by recorded date, but nothing is moved up, and the count of past dates at the top of the
 page says "none verified". Filling that column in is a job for the sheet (you or Instinct), not the dashboard.
+Even then, the only urgency the dashboard shows is the fixed rule above, for a verified date from today to 7 days
+ahead.
 
 While the sheet has none of these columns, Financial priority gives the same order as Recorded date for the
 tasks that aren't done.
@@ -387,7 +405,7 @@ What it can't protect against:
 | Amber "Tasks may be out of date" | Press **Refresh** (or **Reconnect** if the sign-in expired). |
 | A new column's information doesn't appear | Check its header in row 1 against the table in [Updating tasks](#updating-tasks). The bottom of the dashboard lists the optional columns it found. |
 | **You requested** and **Inbound** are empty | The sheet has no `Origin` column, or its cells hold something other than `you requested` or `inbound`. |
-| A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell. See [How Financial priority works](#how-financial-priority-works). |
+| A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell: a verified date then leads its own tier. Only an `opportunity` task is ever moved above another tier, and only while its verified date is from today to 7 days ahead. See [How Financial priority works](#how-financial-priority-works). |
 
 ## Other ways to connect (not used)
 
@@ -414,8 +432,8 @@ The dashboard uses private browser sign-in on purpose. For completeness:
 - `src/lib/tasks.ts`: maps required and optional columns by header name, pads missing trailing cells, skips blank
   rows, and reports missing or duplicate headers, unknown statuses, bad dates, duplicate IDs and Origin,
   Delay-cost basis or Date verified values outside the allowed ones.
-- `src/lib/priority.ts`: Financial priority (the tiers, the verified-date rules and the "why this order" text). It
-  takes structured cells only and never parses free text.
+- `src/lib/priority.ts`: Financial priority (the tiers, the verified-date rules, the fixed 7-day window and the
+  "why this order" text). It takes structured cells only and never parses free text.
 - `src/lib/filters.ts`: status filters, search, the origin views and the date groups. `src/lib/preview.ts` folds
   long free text.
 - `src/lib/dates.ts`: date-only deadlines stay calendar dates; timestamps are shown in the viewer's timezone

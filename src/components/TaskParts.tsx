@@ -73,17 +73,13 @@ export function RecordedDate({ task, today }: { task: Task; today: CalendarDate 
     return <span className="muted">{task.ongoing ? 'Ongoing, no fixed date' : 'No recorded date'}</span>;
   }
 
-  const verified = task.dateVerification === 'verified';
   const check = VERIFICATION_BADGE[task.dateVerification ?? 'unknown'];
   let when: ReactNode = null;
   switch (state.kind) {
     case 'overdue':
-      // Red only when the sheet says the date is verified; otherwise it is just a past date.
-      when = (
-        <span className={verified ? 'badge badge--past-verified' : 'badge badge--warning'}>
-          {capitalize(relativeDay(-state.days))}
-        </span>
-      );
+      // A past date, verified or not, is only a past date: the dashboard does not know whether
+      // a consequence applies now, so it is never shown in the red used for problems.
+      when = <span className="badge badge--warning">{capitalize(relativeDay(-state.days))}</span>;
       break;
     case 'today':
       when = <span className="badge badge--today">Today</span>;

@@ -525,7 +525,7 @@ describe('priority order', () => {
     ]);
     expect(why(card(PLANNING.P07))).toBe('Deadline basis, recorded date in 30 days (verified)');
     expect(why(card(PLANNING.P03))).toBe(
-      'Opportunity, recorded date in 2 days (verified). Moved up because its verified date is within 7 days.',
+      'Opportunity, recorded date in 2 days (verified). Moved up by the fixed 7-day rule: its verified date is within 7 days.',
     );
     expect(why(card(PLANNING.P01))).toBe('Avoidable charge, recorded date in 3 days (not verified)');
     expect(why(card(PLANNING.P02))).toBe('Avoidable charge, no date recorded');
@@ -587,6 +587,15 @@ describe('priority order', () => {
     expect(help).toHaveTextContent('It never reads amounts or dates out of Money at stake, Progress or other text');
     expect(help).toHaveTextContent('only a date marked verified moves a task up');
     expect(help).toHaveTextContent('neither a date nor a Money at stake entry proves a loss');
+    // What the order cannot tell you: the 7-day move is a fixed rule, not a comparison of what is at stake.
+    expect(help).toHaveTextContent(
+      'This is a fixed rule, not a judgement of how much is at stake. The dashboard cannot compare amounts, currencies or the real cost of an opportunity, so the order reflects only the basis label, the recorded date and whether that date is verified. The 7-day window is an arbitrary fixed threshold.',
+    );
+    expect(help).toHaveTextContent(
+      'an opportunity task whose verified date is today or within the next 7 days goes above avoidable-charge and deadline tasks that have no verified date',
+    );
+    expect(help).toHaveTextContent('A verified date that has passed does not move a task up');
+    expect(help).toHaveTextContent('When a verified date has passed, the dashboard does not know whether a consequence applies now.');
     expect(help).toHaveTextContent('The Tasks tab has no “Delay-cost basis” column yet, so every task counts as basis unknown.');
     expect(help).toHaveTextContent('The Tasks tab has no “Date verified” column yet, so no date counts as verified.');
     unmount();
@@ -619,7 +628,7 @@ describe('priority order', () => {
     const { user, unmount } = setupPlanning();
     await connect(user);
     expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
-    expect(screen.getByText('(none verified)').closest('p')).not.toHaveClass('date-note--verified');
+    expect(screen.getByText('(none verified)').closest('p')?.className).toBe('date-note');
     await user.click(screen.getByRole('button', { name: 'See by date' }));
     expect(screen.getByRole('radio', { name: 'By date' })).toBeChecked();
     unmount();
@@ -633,7 +642,42 @@ describe('priority order', () => {
     const second = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
     await connect(second.user);
     expect(screen.getByText('2 tasks have a recorded date in the past')).toBeInTheDocument();
-    expect(screen.getByText('(1 verified)').closest('p')).toHaveClass('date-note--verified');
+    // A verified date that has passed is counted, not raised as an alarm: same note, same colour.
+    expect(screen.getByText('(1 verified)').closest('p')?.className).toBe('date-note');
+    expect(within(card('Past and verified')).getByText('2 days ago').className).toBe('badge badge--warning');
+    expect(within(card('Past, planning only')).getByText('Yesterday').className).toBe('badge badge--warning');
+  });
+
+  it('moves a task up only for a verified date from today to 7 days ahead, and says a passed one has passed', async () => {
+    const values = [
+      [...HEADER, 'Delay-cost basis', 'Date verified', 'Money at stake'],
+      ['T1', 'Charge with no date', 'open', '', '', '', 'avoidable charge', '', 'A large amount'],
+      ['T2', 'Opportunity, verified, 8 days ahead', 'open', '2026-10-29', '', '', 'opportunity', 'verified', 'A large amount'],
+      ['T3', 'Opportunity, verified, 7 days ahead', 'open', '2026-10-28', '', '', 'opportunity', 'verified', 'A small amount'],
+      ['T4', 'Opportunity, verified, 3 days back', 'open', '2026-10-18', '', '', 'opportunity', 'verified', 'A large amount'],
+      ['T5', 'Opportunity, verified, today', 'open', '2026-10-21', '', '', 'opportunity', 'verified', ''],
+      ['T6', 'Charge, verified, 3 days back', 'open', '2026-10-18', '', '', 'avoidable charge', 'verified', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(cardTitles()).toEqual([
+      'Charge, verified, 3 days back',
+      'Opportunity, verified, today',
+      'Opportunity, verified, 7 days ahead',
+      'Charge with no date',
+      'Opportunity, verified, 3 days back',
+      'Opportunity, verified, 8 days ahead',
+    ]);
+    const moved = 'Moved up by the fixed 7-day rule: its verified date is within 7 days.';
+    const passed = 'The date has passed; the dashboard does not know whether a consequence applies now.';
+    expect(why(card('Opportunity, verified, today'))).toBe(`Opportunity, recorded date today (verified). ${moved}`);
+    expect(why(card('Opportunity, verified, 7 days ahead'))).toBe(`Opportunity, recorded date in 7 days (verified). ${moved}`);
+    expect(why(card('Opportunity, verified, 8 days ahead'))).toBe('Opportunity, recorded date in 8 days (verified)');
+    expect(why(card('Opportunity, verified, 3 days back'))).toBe(`Opportunity, recorded date 3 days ago (verified). ${passed}`);
+    expect(why(card('Charge, verified, 3 days back'))).toBe(`Avoidable charge, recorded date 3 days ago (verified). ${passed}`);
+    expect(why(card('Charge with no date'))).toBe('Avoidable charge, no date recorded');
+    // Nothing on the page words a passed date as a missed one.
+    expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
   });
 });
 

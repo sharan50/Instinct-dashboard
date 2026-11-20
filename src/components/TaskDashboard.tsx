@@ -69,7 +69,8 @@ export function TaskDashboard({
     () => filterTasks(data.tasks, { statuses: ALL_STATUSES, query, origin }).length - shown.length,
     [data.tasks, query, origin, shown.length],
   );
-  // Recorded dates that have passed. Only the sheet's "Date verified" column says which of them are real deadlines.
+  // Recorded dates that have passed. The sheet's "Date verified" column says which of them were checked;
+  // nothing says whether a consequence applies now, so this is a count, never an alarm.
   const past = data.tasks.filter((task) => deadlineState(task, today).kind === 'overdue');
   const pastVerified = past.filter((task) => task.dateVerification === 'verified').length;
   const filtered = query.trim() !== '' || !sameSet(statuses, DEFAULT_STATUS_FILTER);
@@ -183,7 +184,7 @@ export function TaskDashboard({
         </section>
 
         {past.length > 0 ? (
-          <p className={pastVerified > 0 ? 'date-note date-note--verified' : 'date-note'}>
+          <p className="date-note">
             <strong>
               {past.length} {past.length === 1 ? 'task has' : 'tasks have'} a recorded date in the past
             </strong>{' '}

@@ -726,8 +726,9 @@ code {
 }
 
 /*
- * Recorded dates that have passed. Amber by default: a recorded date may be a
- * planning or check date. Red only when the sheet marks at least one as verified.
+ * Recorded dates that have passed. Amber, never red: a recorded date may be a
+ * planning or check date, and even for a verified one the dashboard does not
+ * know whether a consequence applies now.
  */
 .date-note {
   display: flex;
@@ -743,16 +744,6 @@ code {
 
 .date-note .btn-link {
   color: var(--amber-text);
-}
-
-.date-note--verified {
-  border-color: var(--red-border);
-  background: var(--red-bg);
-  color: var(--red-text);
-}
-
-.date-note--verified .btn-link {
-  color: var(--red-text);
 }
 
 .results-bar {
@@ -904,8 +895,7 @@ code {
   color: var(--indigo-text);
 }
 
-.badge--unknown,
-.badge--past-verified {
+.badge--unknown {
   background: var(--red-bg);
   border-color: var(--red-border);
   color: var(--red-text);

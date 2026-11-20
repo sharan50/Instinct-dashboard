@@ -164,23 +164,36 @@ test('orders by financial priority, says why, and switches back to the recorded-
   await mockGoogle(page);
   await connect(page);
   await expect(page.getByRole('radio', { name: 'Financial priority' })).toBeChecked();
-  // Verified top-tier date; the opportunity whose verified date has passed; top tier without a verified date; the rest.
+  // The opportunity whose verified date is 2 days ahead is moved up by the fixed rule; then the top tier;
+  // then the other opportunities, where the verified date that has passed leads its tier but is not moved up.
   expect(await taskNames(page)).toEqual([
     NAMES.photos,
-    NAMES.plumber,
     NAMES.library,
+    NAMES.plumber,
     NAMES.broadband,
     NAMES.dentist,
     NAMES.plants,
     NAMES.markup,
   ]);
-  await expect(page.getByText('Deadline basis, recorded date in 2 days (verified)')).toBeVisible();
   await expect(
-    page.getByText('Opportunity, recorded date 3 days ago (verified). Moved up because its verified date has passed.'),
+    page.getByText(
+      'Opportunity, recorded date in 2 days (verified). Moved up by the fixed 7-day rule: its verified date is within 7 days.',
+    ),
   ).toBeVisible();
   await expect(page.getByText('Avoidable charge, recorded date in 8 days (not verified)')).toBeVisible();
+  await expect(
+    page.getByText(
+      'Opportunity, recorded date 3 days ago (verified). The date has passed; the dashboard does not know whether a consequence applies now.',
+    ),
+  ).toBeVisible();
   await expect(page.getByText('Opportunity, recorded date in 40 days (planning, not verified)')).toBeVisible();
   await expect(page.getByText('1 task has a recorded date in the past')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+
+  // The panel says plainly what the order cannot tell you.
+  await page.getByText('How Financial priority works').click();
+  await expect(page.getByText('The dashboard cannot compare amounts, currencies or the real cost of an opportunity')).toBeVisible();
+  await expect(page.getByText('The 7-day window is an arbitrary fixed threshold.')).toBeVisible();
   expect(await hasHorizontalScroll(page)).toBe(false);
 
   await page.getByText('Recorded date', { exact: true }).first().click();
@@ -208,7 +221,7 @@ test('shows one origin per view and keeps counting tasks without one', async ({ 
 
   await page.getByText('You requested', { exact: true }).first().click();
   await expect(page.getByText('Showing 3 of 8 tasks')).toBeVisible();
-  expect(await taskNames(page)).toEqual([NAMES.plumber, NAMES.library, NAMES.broadband]);
+  expect(await taskNames(page)).toEqual([NAMES.library, NAMES.plumber, NAMES.broadband]);
   await expect(page.getByText('Tasks without a valid Origin are in All tasks and By date, not in this view.')).toBeVisible();
 
   await page.getByText('Inbound', { exact: true }).first().click();
@@ -216,7 +229,7 @@ test('shows one origin per view and keeps counting tasks without one', async ({ 
   expect(await taskNames(page)).toEqual([NAMES.photos, NAMES.dentist]);
 
   // Status filters and search still apply inside the view.
-  await page.getByRole('searchbox', { name: 'Search tasks and notes' }).fill('deposit');
+  await page.getByRole('searchbox', { name: 'Search tasks and notes' }).fill('booth');
   await expect(page.getByText('Showing 1 of 8 tasks')).toBeVisible();
   await page.getByRole('searchbox', { name: 'Search tasks and notes' }).fill('');
   await page.getByText('Waiting on you', { exact: true }).first().click();

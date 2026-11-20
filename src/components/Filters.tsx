@@ -1,5 +1,6 @@
 import { useId } from 'react';
-import { SOON_DAYS, type SortOrder, type StatusKey, type View } from '../lib/filters.ts';
+import type { SortOrder, StatusKey, View } from '../lib/filters.ts';
+import { PROMOTION_WINDOW_DAYS } from '../lib/priority.ts';
 import { OPTIONAL_COLUMNS, STATUS_LABELS, STATUSES, type SheetColumns } from '../lib/tasks.ts';
 
 function statusLabel(key: StatusKey): string {
@@ -127,7 +128,10 @@ export function SortControl({ order, onChange }: { order: SortOrder; onChange: (
   );
 }
 
-/** The ordering rules in plain words, so the order can be checked against the sheet. */
+/**
+ * The ordering rules in plain words, so the order can be checked against the
+ * sheet, with what the order can't tell you: it is not a ranking by size.
+ */
 export function OrderExplainer({ columns }: { columns: SheetColumns }) {
   return (
     <details className="order-help">
@@ -145,15 +149,23 @@ export function OrderExplainer({ columns }: { columns: SheetColumns }) {
           then tasks with no date, in sheet order.
         </li>
         <li>
-          One exception: an opportunity task with a verified date that has passed or is within {SOON_DAYS} days goes
-          above avoidable-charge and deadline tasks that have no verified date.
+          One fixed rule: an opportunity task whose verified date is today or within the next {PROMOTION_WINDOW_DAYS}{' '}
+          days goes above avoidable-charge and deadline tasks that have no verified date. A verified date that has
+          passed does not move a task up: the task keeps its place among the opportunity tasks.
         </li>
         <li>Done tasks, when shown, come last.</li>
       </ol>
       <p>
+        <strong>This is a fixed rule, not a judgement of how much is at stake.</strong> The dashboard cannot compare
+        amounts, currencies or the real cost of an opportunity, so the order reflects only the basis label, the
+        recorded date and whether that date is verified. The {PROMOTION_WINDOW_DAYS}-day window is an arbitrary fixed
+        threshold.
+      </p>
+      <p>
         The basis and the dates are what the sheet says; the dashboard can’t check them. A recorded date may be a
         planning or check date, so only a date marked verified moves a task up, and neither a date nor a Money at
-        stake entry proves a loss.
+        stake entry proves a loss. When a verified date has passed, the dashboard does not know whether a consequence
+        applies now.
       </p>
       {columns.basis ? null : (
         <p>

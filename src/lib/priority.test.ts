@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { HEADER, makeTask, planningValues, sampleValues } from '../test/fixtures.ts';
 import { parseCalendarDate, type CalendarDate } from './dates.ts';
 import { DEFAULT_STATUS_FILTER, filterTasks, sortByDeadline } from './filters.ts';
-import { priorityRank, priorityReason, sortByPriority } from './priority.ts';
+import {
+  PASSED_NOTE,
+  priorityRank,
+  priorityReason,
+  PROMOTED_NOTE,
+  PROMOTION_WINDOW_DAYS,
+  sortByPriority,
+} from './priority.ts';
 import { parseTaskSheet, type Task } from './tasks.ts';
 
 const today = parseCalendarDate('2026-10-21') as CalendarDate;
@@ -113,14 +120,26 @@ describe('an undated charge against a task with a date', () => {
     expect(order(tasks)).toEqual(['charge-past', 'deadline-tomorrow', 'undated-charge']);
   });
 
-  it('goes below an adjacent-tier task whose verified date is past or within 7 days', () => {
+  it('goes below an adjacent-tier task whose verified date is today or within 7 days', () => {
     const tasks = parse(
       ['undated-charge', '', 'avoidable charge', ''],
       ['opportunity-in-2-days', '2026-10-23', 'opportunity', 'verified'],
-      ['opportunity-past', '2026-10-18', 'opportunity', 'verified'],
+      ['opportunity-today', '2026-10-21', 'opportunity', 'verified'],
     );
-    expect(order(tasks)).toEqual(['opportunity-past', 'opportunity-in-2-days', 'undated-charge']);
-    expect(priorityRank(tasks[1] as Task, today).lifted).toBe(true);
+    expect(order(tasks)).toEqual(['opportunity-today', 'opportunity-in-2-days', 'undated-charge']);
+    expect(tasks.map((task) => priorityRank(task, today).lifted)).toEqual([false, true, true]);
+  });
+
+  it('stays above an adjacent-tier task whose verified date has passed, however recently or long ago', () => {
+    const tasks = parse(
+      ['opportunity-yesterday', '2026-10-20', 'opportunity', 'verified'],
+      ['opportunity-last-year', '2025-10-21', 'opportunity', 'verified'],
+      ['undated-charge', '', 'avoidable charge', ''],
+      ['charge-planning-later', '2026-12-01', 'avoidable charge', 'planning'],
+    );
+    // Neither passed date crosses into the top tier; inside their own tier they stay in date order.
+    expect(order(tasks)).toEqual(['charge-planning-later', 'undated-charge', 'opportunity-last-year', 'opportunity-yesterday']);
+    expect(tasks.map((task) => priorityRank(task, today).lifted)).toEqual([false, false, false, false]);
   });
 
   it('stays above an adjacent-tier task whose date is not verified, however close that date is', () => {
@@ -154,13 +173,35 @@ describe('an undated charge against a task with a date', () => {
     ]);
   });
 
-  it('only moves a verified date up while it is past or within 7 days', () => {
+  it('uses a fixed window of exactly 7 days: today and day 7 move up, yesterday and day 8 do not', () => {
+    expect(PROMOTION_WINDOW_DAYS).toBe(7);
     const tasks = parse(
       ['undated-charge', '', 'avoidable charge', ''],
-      ['in-8-days', '2026-10-29', 'opportunity', 'verified'],
-      ['in-7-days', '2026-10-28', 'opportunity', 'verified'],
+      ['day-8', '2026-10-29', 'opportunity', 'verified'],
+      ['day-7', '2026-10-28', 'opportunity', 'verified'],
+      ['day-6', '2026-10-27', 'opportunity', 'verified'],
+      ['today', '2026-10-21', 'opportunity', 'verified'],
+      ['yesterday', '2026-10-20', 'opportunity', 'verified'],
     );
-    expect(order(tasks)).toEqual(['in-7-days', 'undated-charge', 'in-8-days']);
+    const lifted = Object.fromEntries(tasks.map((task) => [task.id, priorityRank(task, today).lifted]));
+    expect(lifted).toEqual({
+      'undated-charge': false,
+      'day-8': false,
+      'day-7': true,
+      'day-6': true,
+      today: true,
+      yesterday: false,
+    });
+    expect(order(tasks)).toEqual(['today', 'day-6', 'day-7', 'undated-charge', 'yesterday', 'day-8']);
+  });
+
+  it('applies the same window whatever the text says is at stake: it is not a ranking by size', () => {
+    const tasks = parse(
+      ['undated-charge', '', 'avoidable charge', '', 'A very large amount, 1 000 000'],
+      ['small-in-7-days', '2026-10-28', 'opportunity', 'verified', 'Pennies'],
+      ['huge-in-8-days', '2026-10-29', 'opportunity', 'verified', 'Everything, 999 999 999 in any currency'],
+    );
+    expect(order(tasks)).toEqual(['small-in-7-days', 'undated-charge', 'huge-in-8-days']);
   });
 
   it('only applies to the tier next to the top: unknown and sunk-or-reference tasks are never moved up', () => {
@@ -203,6 +244,17 @@ describe('verified, planning and unknown dates', () => {
       );
       expect(order(tasks), basis || 'blank').toEqual(['verified-later', 'planning-past', 'none']);
     }
+  });
+
+  it('keeps a passed verified date in its place inside its own tier: before every date that is not verified', () => {
+    const tasks = parse(
+      ['none', '', 'opportunity', ''],
+      ['planning-tomorrow', '2026-10-22', 'opportunity', 'planning'],
+      ['verified-in-30-days', '2026-11-20', 'opportunity', 'verified'],
+      ['verified-past', '2026-10-18', 'opportunity', 'verified'],
+      ['unknown-older-past', '2026-10-01', 'opportunity', ''],
+    );
+    expect(order(tasks)).toEqual(['verified-past', 'verified-in-30-days', 'unknown-older-past', 'planning-tomorrow', 'none']);
   });
 
   it('counts "verified" without a usable date as no date at all', () => {
@@ -254,12 +306,14 @@ describe('sortByPriority', () => {
     expect(tasks.map((task) => task.id)).toEqual(before);
   });
 
-  it('depends on today only for the 7-day rule', () => {
+  it('moves a task up only while its verified date is in the window: the move ends once the date has passed', () => {
     const tasks = parse(['undated-charge', '', 'avoidable charge', ''], ['opportunity', '2026-10-30', 'opportunity', 'verified']);
     const ids = (iso: string) => sortByPriority(tasks, parseCalendarDate(iso) as CalendarDate).map((task) => task.id);
-    expect(ids('2026-10-22')).toEqual(['undated-charge', 'opportunity']);
-    expect(ids('2026-10-23')).toEqual(['opportunity', 'undated-charge']);
-    expect(ids('2026-11-15')).toEqual(['opportunity', 'undated-charge']);
+    expect(ids('2026-10-22')).toEqual(['undated-charge', 'opportunity']); // 8 days ahead
+    expect(ids('2026-10-23')).toEqual(['opportunity', 'undated-charge']); // 7 days ahead
+    expect(ids('2026-10-30')).toEqual(['opportunity', 'undated-charge']); // today
+    expect(ids('2026-10-31')).toEqual(['undated-charge', 'opportunity']); // yesterday
+    expect(ids('2027-10-30')).toEqual(['undated-charge', 'opportunity']); // a year on: no lasting urgency
   });
 });
 
@@ -293,14 +347,36 @@ describe('priorityReason', () => {
     );
   });
 
-  it('explains when a verified date moved a task up', () => {
+  it('says a task was moved up by the fixed rule, not by anything about its size', () => {
+    expect(PROMOTED_NOTE).toBe('Moved up by the fixed 7-day rule: its verified date is within 7 days.');
     expect(reason(['x', '2026-10-23', 'opportunity', 'verified'])).toEqual({
       text: 'Opportunity, recorded date in 2 days (verified)',
-      note: 'Moved up because its verified date is within 7 days.',
+      note: PROMOTED_NOTE,
     });
-    expect(reason(['x', '2026-10-18', 'opportunity', 'verified']).note).toBe('Moved up because its verified date has passed.');
+    expect(reason(['x', '2026-10-21', 'opportunity', 'verified', 'A huge amount']).note).toBe(PROMOTED_NOTE);
+    expect(reason(['x', '2026-10-28', 'opportunity', 'verified']).note).toBe(PROMOTED_NOTE);
+    // Not moved up: a day too far, a date that is not verified, or a task that is in the top tier already.
+    expect(reason(['x', '2026-10-29', 'opportunity', 'verified']).note).toBeNull();
     expect(reason(['x', '2026-10-23', 'opportunity', 'planning']).note).toBeNull();
     expect(reason(['x', '2026-10-23', 'avoidable charge', 'verified']).note).toBeNull();
+  });
+
+  it('says a passed verified date has passed, and that what follows from it is not known', () => {
+    expect(PASSED_NOTE).toBe('The date has passed; the dashboard does not know whether a consequence applies now.');
+    expect(reason(['x', '2026-10-18', 'opportunity', 'verified'])).toEqual({
+      text: 'Opportunity, recorded date 3 days ago (verified)',
+      note: PASSED_NOTE,
+    });
+    for (const basis of ['avoidable charge', 'deadline', 'opportunity', 'sunk or reference', 'unknown', '', 'nonsense']) {
+      expect(reason(['x', '2026-10-20', basis, 'verified', 'Fee of 250']).note, basis).toBe(PASSED_NOTE);
+      expect(reason(['x', '2025-01-01', basis, 'verified']).note, basis).toBe(PASSED_NOTE);
+    }
+    // Nothing in it claims that anything was missed, charged or lost.
+    expect(PASSED_NOTE).not.toMatch(/miss|late|overdue|due\b|lost|lose|loss|penalt|charg|fee|expire|forfeit|cost/i);
+    // A past date nobody verified already says "not verified"; a date that is not past needs no such note.
+    expect(reason(['x', '2026-10-18', 'opportunity', 'planning']).note).toBeNull();
+    expect(reason(['x', '2026-10-18', 'avoidable charge', '']).note).toBeNull();
+    expect(reason(['x', '2026-10-21', 'avoidable charge', 'verified']).note).toBeNull();
   });
 
   it('does not rank done tasks', () => {
