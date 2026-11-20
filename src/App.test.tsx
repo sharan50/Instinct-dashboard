@@ -5,7 +5,7 @@ import { App } from './App.tsx';
 import { readConfig } from './config.ts';
 import type { FormatOptions } from './lib/dates.ts';
 import { createFakeGoogle, errorResponse, scriptedFetch, valuesResponse, type FakeGoogle } from './test/fakeGoogle.ts';
-import { HEADER, sampleValues } from './test/fixtures.ts';
+import { FULL_HEADER, HEADER, planningValues, sampleValues } from './test/fixtures.ts';
 import { setWideScreen } from './test/viewport.ts';
 
 const CLIENT_ID = '123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com';
@@ -66,6 +66,27 @@ async function tabTo(user: ReturnType<typeof userEvent.setup>, element: HTMLElem
 
 const syncHeadline = () => document.querySelector('.sync-bar__headline')?.textContent ?? '';
 const cardTitles = () => screen.queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+const card = (title: string) => screen.getByRole('article', { name: title });
+/** One labelled line of a task ("Progress", "Money at stake" and so on). */
+const line = (task: HTMLElement, label: string) => within(task).getByText(label, { selector: 'dt' }).parentElement as HTMLElement;
+/** The "why this order" line of a task, without its label. */
+const why = (task: HTMLElement) => (task.querySelector('.why-order')?.textContent ?? '').replace('Why this order: ', '');
+
+/** The invented rows that use every optional column (see planningValues). */
+function setupPlanning() {
+  return setup({ fetchImpl: scriptedFetch(valuesResponse(planningValues())) });
+}
+
+const PLANNING = {
+  P01: 'Return the rented ladder',
+  P02: 'Cancel the unused gym trial',
+  P03: 'Send the club membership form',
+  P04: 'Compare bike insurance quotes',
+  P05: 'File the appliance warranty card',
+  P06: 'Archive last year’s receipts',
+  P07: 'Renew the parking permit',
+  P08: 'Return the borrowed drill',
+};
 
 describe('setup', () => {
   it('shows a setup screen, not fake data, when settings are missing', () => {
@@ -241,7 +262,8 @@ describe('showing tasks', () => {
     expect(screen.getByRole('checkbox', { name: 'Waiting on you, 2 tasks' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Waiting on someone else, 1 task' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Done, 1 task' })).not.toBeChecked();
-    expect(screen.getByText('1 overdue task')).toBeInTheDocument();
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    expect(screen.getByText('(none verified)')).toBeInTheDocument();
   });
 
   it('shows when the sheet was fetched and each row’s own last update, in the viewer’s timezone', async () => {
@@ -273,7 +295,11 @@ describe('showing tasks', () => {
     await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
     const done = screen.getByRole('article', { name: 'Return borrowed camera' });
     expect(within(done).getByText('Thu, 15 Oct 2026')).toBeInTheDocument();
-    expect(within(done).queryByText(/Overdue/)).not.toBeInTheDocument();
+    // Its date is 6 days back, but a done task's date no longer counts as past.
+    expect(within(done).queryByText('6 days ago')).not.toBeInTheDocument();
+    expect(within(done).queryByText(/overdue/i)).not.toBeInTheDocument();
+    const waiting = screen.getByRole('article', { name: 'Plumber quote for kitchen tap' });
+    expect(within(waiting).getByText('3 days ago')).toBeInTheDocument();
   });
 
   it('renders notes as text and makes only https links clickable', async () => {
@@ -326,12 +352,12 @@ describe('showing tasks', () => {
     setWideScreen(true);
     const wide = setup();
     await connect(wide.user);
-    const table = screen.getByRole('table', { name: 'Tasks, earliest deadline first' });
+    const table = screen.getByRole('table', { name: 'Tasks by financial priority' });
     expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
       'ID',
       'Task',
       'Status',
-      'Deadline',
+      'Recorded date',
       'Last update',
       'Notes',
     ]);
@@ -369,19 +395,381 @@ describe('filters', () => {
     expect(screen.getByText(/1 task matches with a status that is hidden right now/)).toBeInTheDocument();
   });
 
-  it('groups tasks by deadline', async () => {
+  it('groups tasks by recorded date', async () => {
     const { user } = setup();
     await connect(user);
-    await user.click(screen.getByRole('radio', { name: 'Deadlines' }));
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
     const group = (name: RegExp) =>
       within(screen.getByRole('region', { name })).queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-    expect(group(/^Overdue/)).toEqual(['Plumber quote for kitchen tap']);
+    expect(group(/^Recorded date passed/)).toEqual(['Plumber quote for kitchen tap']);
     expect(group(/^Next 7 days/)).toEqual([]);
-    expect(screen.getByText('Nothing due in the next 7 days.')).toBeInTheDocument();
+    expect(screen.getByText('No recorded dates in the next 7 days.')).toBeInTheDocument();
     expect(group(/^Later/)).toEqual(['Renew library card', 'Order new passport photos']);
     expect(group(/^Ongoing/)).toEqual(['Water the balcony plants']);
-    expect(group(/^No deadline/)).toEqual(['Book dentist check-up']);
+    expect(group(/^No recorded date/)).toEqual(['Book dentist check-up']);
     expect(screen.queryByRole('region', { name: /^Done/ })).not.toBeInTheDocument();
+    // The sort order belongs to the list views: this view is always grouped by date.
+    expect(screen.queryByRole('radio', { name: 'Financial priority' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+  });
+});
+
+describe('origin views', () => {
+  it('offers You requested and Inbound next to All tasks and By date', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    const views = within(screen.getByRole('group', { name: 'View' })).getAllByRole('radio');
+    expect(views.map((radio) => radio.closest('label')?.textContent)).toEqual(['All tasks', 'By date', 'You requested', 'Inbound']);
+    expect(screen.getByRole('radio', { name: 'All tasks' })).toBeChecked();
+  });
+
+  it('shows one origin at a time and keeps counting the tasks that have none', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    expect(screen.getByText('Showing 7 of 8 tasks')).toBeInTheDocument();
+    expect(screen.getByText('Origin missing: 2 tasks.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'You requested' }));
+    expect(cardTitles()).toEqual([PLANNING.P03, PLANNING.P01]);
+    expect(screen.getByText('Showing 2 of 8 tasks')).toBeInTheDocument();
+    expect(screen.getByText('Origin missing: 2 tasks.').closest('p')).toHaveTextContent(
+      'Origin missing: 2 tasks. Tasks without a valid Origin are in All tasks and By date, not in this view.',
+    );
+
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    expect(cardTitles()).toEqual([PLANNING.P07, PLANNING.P02, PLANNING.P06]);
+    expect(screen.getByText('Showing 3 of 8 tasks')).toBeInTheDocument();
+    expect(screen.getByText('Origin missing: 2 tasks.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'All tasks' }));
+    expect(cardTitles()).toHaveLength(7);
+  });
+
+  it('keeps rows with a blank or wrong Origin in All tasks, marked, and lists the wrong one as a problem', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    expect(within(card(PLANNING.P04)).getByText('Origin missing')).toBeInTheDocument();
+    expect(within(card(PLANNING.P05)).getByText('Origin not recognised: vendor')).toBeInTheDocument();
+    expect(within(card(PLANNING.P01)).getByText('You requested')).toBeInTheDocument();
+    expect(within(card(PLANNING.P02)).getByText('Inbound')).toBeInTheDocument();
+    expect(screen.getByText('1 problem found in the sheet')).toBeInTheDocument();
+    expect(screen.getByText('Row 6 (P05): origin “vendor” is not one of: you requested, inbound.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(cardTitles()).toContain(PLANNING.P04);
+    expect(cardTitles()).toContain(PLANNING.P05);
+  });
+
+  it('keeps the status filters and the search working inside an origin view', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    await user.click(screen.getByRole('checkbox', { name: /^Waiting on you/ }));
+    expect(cardTitles()).toEqual([PLANNING.P07, PLANNING.P06]);
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(screen.getByRole('radio', { name: 'Inbound' })).toBeChecked();
+    expect(cardTitles()).toEqual([PLANNING.P07, PLANNING.P02, PLANNING.P06]);
+
+    await user.type(screen.getByRole('searchbox'), 'permit');
+    expect(cardTitles()).toEqual([PLANNING.P07]);
+    await user.click(screen.getByRole('radio', { name: 'You requested' }));
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText('Try a different word, or show more statuses.')).toBeInTheDocument();
+
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'drill');
+    expect(screen.getByText(/1 task matches with a status that is hidden right now/)).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toEqual([PLANNING.P08]);
+  });
+
+  it('counts the missing origins among the tasks that pass the filters', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await user.type(screen.getByRole('searchbox'), 'insurance');
+    expect(screen.getByText('Origin missing: 1 task.')).toBeInTheDocument();
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'ladder');
+    expect(screen.queryByText(/Origin missing:/)).not.toBeInTheDocument();
+  });
+
+  it('explains an origin view the sheet never uses, instead of showing an empty list', async () => {
+    const { user } = setup();
+    await connect(user);
+    expect(screen.getByText('Origin missing: 5 tasks.')).toBeInTheDocument();
+    expect(screen.getByText(/The Tasks tab has no Origin column yet, so You requested and Inbound stay empty/)).toBeInTheDocument();
+    // Without the column, cards carry no origin badge.
+    expect(screen.queryByText('Origin missing')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    expect(screen.getByRole('heading', { name: 'No tasks marked “Inbound”' })).toBeInTheDocument();
+    expect(screen.getByText(/Add one with “you requested” or “inbound” on each row/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show all tasks' }));
+    expect(cardTitles()).toHaveLength(5);
+  });
+});
+
+describe('priority order', () => {
+  it('sorts by financial priority by default and says why on every card', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    expect(screen.getByRole('radio', { name: 'Financial priority' })).toBeChecked();
+    expect(cardTitles()).toEqual([
+      PLANNING.P07,
+      PLANNING.P03,
+      PLANNING.P01,
+      PLANNING.P02,
+      PLANNING.P04,
+      PLANNING.P05,
+      PLANNING.P06,
+    ]);
+    expect(why(card(PLANNING.P07))).toBe('Deadline basis, recorded date in 30 days (verified)');
+    expect(why(card(PLANNING.P03))).toBe(
+      'Opportunity, recorded date in 2 days (verified). Moved up because its verified date is within 7 days.',
+    );
+    expect(why(card(PLANNING.P01))).toBe('Avoidable charge, recorded date in 3 days (not verified)');
+    expect(why(card(PLANNING.P02))).toBe('Avoidable charge, no date recorded');
+    expect(why(card(PLANNING.P04))).toBe('Opportunity, recorded date tomorrow (planning, not verified)');
+    expect(why(card(PLANNING.P05))).toBe('Basis unknown, recorded date 2 days ago (not verified)');
+    expect(why(card(PLANNING.P06))).toBe('Sunk or reference, no date recorded');
+  });
+
+  it('switches to the recorded-date order and back', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(cardTitles()).toEqual([
+      PLANNING.P05,
+      PLANNING.P04,
+      PLANNING.P03,
+      PLANNING.P01,
+      PLANNING.P07,
+      PLANNING.P02,
+      PLANNING.P06,
+    ]);
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'Financial priority' }));
+    expect(cardTitles()[0]).toBe(PLANNING.P07);
+    expect(screen.getAllByText('Why this order:')).toHaveLength(7);
+  });
+
+  it('keeps the sort order when the view changes, and keeps done tasks last', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    expect(cardTitles()).toEqual([PLANNING.P07, PLANNING.P02, PLANNING.P06]);
+    expect(screen.getByRole('radio', { name: 'Recorded date' })).toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: 'Financial priority' }));
+    await user.click(screen.getByRole('radio', { name: 'You requested' }));
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toEqual([PLANNING.P03, PLANNING.P01, PLANNING.P08]);
+    expect(why(card(PLANNING.P08))).toBe('Done, not ranked');
+  });
+
+  it('is the same as the recorded-date order while the sheet has none of the new columns', async () => {
+    const { user } = setup();
+    await connect(user);
+    const byPriority = cardTitles();
+    expect(why(card('Renew library card'))).toBe('Basis unknown, recorded date in 8 days (not verified)');
+    expect(why(card('Book dentist check-up'))).toBe('Basis unknown, no date recorded');
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(cardTitles()).toEqual(byPriority);
+  });
+
+  it('explains its rules and says which columns the sheet does not have yet', async () => {
+    const { user, unmount } = setup();
+    await connect(user);
+    await user.click(screen.getByText('How Financial priority works'));
+    const help = screen.getByText('How Financial priority works').closest('details') as HTMLElement;
+    expect(help).toHaveTextContent('It never reads amounts or dates out of Money at stake, Progress or other text');
+    expect(help).toHaveTextContent('only a date marked verified moves a task up');
+    expect(help).toHaveTextContent('neither a date nor a Money at stake entry proves a loss');
+    expect(help).toHaveTextContent('The Tasks tab has no “Delay-cost basis” column yet, so every task counts as basis unknown.');
+    expect(help).toHaveTextContent('The Tasks tab has no “Date verified” column yet, so no date counts as verified.');
+    unmount();
+
+    const full = setupPlanning();
+    await connect(full.user);
+    expect(screen.queryByText(/column yet/)).not.toBeInTheDocument();
+  });
+
+  it('calls the date a recorded date, with its verification, and never due, overdue or enforced', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    expect(within(line(card(PLANNING.P07), 'Recorded date')).getByText('Verified')).toBeInTheDocument();
+    expect(within(line(card(PLANNING.P04), 'Recorded date')).getByText('Planning date')).toBeInTheDocument();
+    expect(line(card(PLANNING.P04), 'Recorded date')).toHaveTextContent('Thu, 22 Oct 2026 Tomorrow Planning date');
+    expect(line(card(PLANNING.P01), 'Recorded date')).toHaveTextContent('Sat, 24 Oct 2026 In 3 days Not verified');
+    expect(line(card(PLANNING.P05), 'Recorded date')).toHaveTextContent('Mon, 19 Oct 2026 2 days ago Not verified');
+    expect(line(card(PLANNING.P02), 'Recorded date')).toHaveTextContent(/^Recorded dateNo recorded date$/);
+
+    const everything = () => document.body.textContent ?? '';
+    expect(everything()).not.toMatch(/overdue|\bdue\b|enforced/i);
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(everything()).not.toMatch(/overdue|\bdue\b|enforced/i);
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(everything()).not.toMatch(/overdue|\bdue\b|enforced/i);
+    expect(screen.getByRole('region', { name: /^Recorded date passed/ })).toHaveTextContent(PLANNING.P05);
+  });
+
+  it('counts recorded dates in the past and says how many of them are verified', async () => {
+    const { user, unmount } = setupPlanning();
+    await connect(user);
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    expect(screen.getByText('(none verified)').closest('p')).not.toHaveClass('date-note--verified');
+    await user.click(screen.getByRole('button', { name: 'See by date' }));
+    expect(screen.getByRole('radio', { name: 'By date' })).toBeChecked();
+    unmount();
+
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Past and verified', 'open', '2026-10-19', '', '', 'verified'],
+      ['T2', 'Past, planning only', 'open', '2026-10-20', '', '', 'planning'],
+      ['T3', 'Past but finished', 'done', '2026-10-01', '', '', 'verified'],
+    ];
+    const second = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(second.user);
+    expect(screen.getByText('2 tasks have a recorded date in the past')).toBeInTheDocument();
+    expect(screen.getByText('(1 verified)').closest('p')).toHaveClass('date-note--verified');
+  });
+});
+
+describe('progress on each task', () => {
+  it('shows Progress, Money at stake, Hands-on effort and Expected finish as separate labelled lines', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    const ladder = card(PLANNING.P01);
+    expect(line(ladder, 'Progress')).toHaveTextContent(/^ProgressReturn slot booked\.$/);
+    expect(line(ladder, 'Money at stake')).toHaveTextContent(/^Money at stakeLate-return fee for each extra day Basis: avoidable charge$/);
+    expect(line(ladder, 'Hands-on effort')).toHaveTextContent(/^Hands-on effort20 minutes$/);
+    expect(line(ladder, 'Expected finish')).toHaveTextContent(
+      /^Expected finishThis SaturdayIncludes any waiting on others, not just hands-on time\.$/,
+    );
+    expect(within(card(PLANNING.P07)).getByText('Basis: deadline')).toBeInTheDocument();
+    expect(within(card(PLANNING.P06)).getByText('Basis: sunk or reference')).toBeInTheDocument();
+    expect(within(card(PLANNING.P05)).getByText('Basis unknown')).toBeInTheDocument();
+  });
+
+  it('says when a cell is blank, and when the finish includes waiting on someone else', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    const club = card(PLANNING.P03);
+    expect(line(club, 'Money at stake')).toHaveTextContent(/^Money at stakeNot recorded Basis: opportunity$/);
+    expect(line(club, 'Hands-on effort')).toHaveTextContent(/^Hands-on effortNot recorded$/);
+    expect(line(club, 'Expected finish')).toHaveTextContent(/^Expected finishEnd of next week Includes waiting on someone else$/);
+    // No finish recorded: nothing is guessed, and there is no waiting note.
+    expect(line(card(PLANNING.P02), 'Expected finish')).toHaveTextContent(/^Expected finishNot recorded$/);
+    expect(line(card(PLANNING.P02), 'Progress')).toHaveTextContent(/^ProgressNot recorded$/);
+  });
+
+  it('folds long text behind a toggle like the notes one', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    const club = card(PLANNING.P03);
+    expect(screen.getAllByRole('button', { name: /^Show full text for/ })).toHaveLength(1);
+    const toggle = within(club).getByRole('button', { name: `Show full text for ${PLANNING.P03}` });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(line(club, 'Progress')).toHaveTextContent(/before it can be posted,…$/);
+    expect(within(club).queryByRole('link', { name: 'https://example.org/club/checklist' })).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(within(club).getByRole('button', { name: `Show less text for ${PLANNING.P03}` })).toHaveAttribute('aria-expanded', 'true');
+    expect(line(club, 'Progress')).toHaveTextContent(/and bring a pencil\.$/);
+    expect(within(club).getByRole('link', { name: 'https://example.org/club/checklist' })).toHaveAttribute(
+      'rel',
+      'noopener noreferrer',
+    );
+
+    await user.click(within(club).getByRole('button', { name: `Show less text for ${PLANNING.P03}` }));
+    expect(line(club, 'Progress')).toHaveTextContent(/before it can be posted,…$/);
+  });
+
+  it('finds tasks by these lines and flags a match that is folded away', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await user.type(screen.getByRole('searchbox'), 'scanned');
+    expect(cardTitles()).toEqual([PLANNING.P06]);
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'pencil');
+    expect(cardTitles()).toEqual([PLANNING.P03]);
+    expect(
+      screen.getByRole('button', { name: `Show full text for ${PLANNING.P03} (matches your search)` }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the text as written: no HTML, no reading of amounts, only https links', async () => {
+    const values = [
+      [...HEADER, 'Progress', 'Money at stake', 'Delay-cost basis'],
+      ['T1', 'Tricky text', 'open', '', '', '', '<img src=x onerror="alert(1)"> see https://example.org/p or http://example.org/q', '1,250.00 by 2026-10-22?', 'unknown'],
+    ];
+    const { user, container } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    const tricky = card('Tricky text');
+    expect(line(tricky, 'Progress')).toHaveTextContent('<img src=x onerror="alert(1)"> see https://example.org/p or http://example.org/q');
+    expect(container.querySelector('img')).toBeNull();
+    expect(within(tricky).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['https://example.org/p']);
+    expect(line(tricky, 'Money at stake')).toHaveTextContent(/^Money at stake1,250\.00 by 2026-10-22\? Basis unknown$/);
+    // The date written in the text is not the task's date.
+    expect(why(tricky)).toBe('Basis unknown, no date recorded');
+    expect(line(tricky, 'Recorded date')).toHaveTextContent('No recorded date');
+  });
+
+  it('adds no lines for columns the sheet does not have, and lists which optional columns it found', async () => {
+    const { user, unmount } = setup();
+    await connect(user);
+    const library = card('Renew library card');
+    for (const label of ['Progress', 'Money at stake', 'Hands-on effort', 'Expected finish']) {
+      expect(within(library).queryByText(label)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText(/^Basis/, { selector: '.badge' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Optional columns found in the Tasks tab: none. Not found, so not shown: Links, Origin, Money at stake, Progress, Hands-on effort, Delay-cost basis, Expected finish incl. waits, Date verified.',
+      ),
+    ).toBeInTheDocument();
+    unmount();
+
+    const full = setupPlanning();
+    await connect(full.user);
+    expect(screen.getByText(`Optional columns found in the Tasks tab: ${FULL_HEADER.slice(HEADER.length).join(', ')}.`)).toBeInTheDocument();
+  });
+
+  it('puts the lines in one table column on a wide screen', async () => {
+    setWideScreen(true);
+    const { user } = setupPlanning();
+    await connect(user);
+    const table = screen.getByRole('table', { name: 'Tasks by financial priority' });
+    expect(within(table).getAllByRole('columnheader').map((th) => th.textContent)).toEqual([
+      'ID',
+      'Task',
+      'Status',
+      'Recorded date',
+      'Last update',
+      'Progress and notes',
+    ]);
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((row) => within(row).getByRole('rowheader').querySelector('span')?.textContent)).toEqual([
+      PLANNING.P07,
+      PLANNING.P03,
+      PLANNING.P01,
+      PLANNING.P02,
+      PLANNING.P04,
+      PLANNING.P05,
+      PLANNING.P06,
+    ]);
+    const ladder = rows[2] as HTMLElement;
+    expect(ladder).toHaveTextContent('Why this order: Avoidable charge, recorded date in 3 days (not verified)');
+    expect(line(ladder, 'Progress')).toHaveTextContent('Return slot booked.');
+    expect(within(ladder).getByText('Basis: avoidable charge')).toBeInTheDocument();
+    expect(within(ladder).getByText('Not verified')).toBeInTheDocument();
+    expect(within(ladder).getByRole('button', { name: `Show notes for ${PLANNING.P01}` })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(screen.getByRole('table', { name: 'Tasks, earliest recorded date first' })).toBeInTheDocument();
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
   });
 });
 
@@ -509,5 +897,26 @@ describe('keyboard use', () => {
     await user.keyboard('{Enter}');
     expect(notes).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText(/Bring proof of address/)).toBeVisible();
+  });
+
+  it('reaches the views, the sort order and the full-text toggle from the keyboard', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    await tabTo(user, screen.getByRole('searchbox'));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'All tasks' }));
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(screen.getByRole('radio', { name: 'You requested' })).toBeChecked();
+    expect(cardTitles()).toEqual([PLANNING.P03, PLANNING.P01]);
+
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Financial priority' }));
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('radio', { name: 'Recorded date' })).toBeChecked();
+
+    const fullText = screen.getByRole('button', { name: `Show full text for ${PLANNING.P03}` });
+    await tabTo(user, fullText);
+    await user.keyboard('{Enter}');
+    expect(screen.getByText(/and bring a pencil/)).toBeVisible();
   });
 });

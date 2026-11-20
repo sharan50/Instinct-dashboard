@@ -11,7 +11,14 @@ import {
   type TokenResponse,
 } from '../lib/googleAuth.ts';
 import { fetchSheetValues, SHEETS_READONLY_SCOPE, SheetsApiError, type SheetsErrorKind } from '../lib/sheetsApi.ts';
-import { parseTaskSheet, SheetFormatError, type DataIssue, type ParsedSheet, type Task } from '../lib/tasks.ts';
+import {
+  parseTaskSheet,
+  SheetFormatError,
+  type DataIssue,
+  type ParsedSheet,
+  type SheetColumns,
+  type Task,
+} from '../lib/tasks.ts';
 import { usePageVisible } from './usePageVisible.ts';
 
 /** Automatic refreshes happen at most this often, and only while the page is visible. */
@@ -44,6 +51,8 @@ export interface FetchProblem {
 export interface DashboardData {
   tasks: Task[];
   issues: DataIssue[];
+  /** Which optional columns the sheet had at this fetch. */
+  columns: SheetColumns;
   fetchedAt: number;
 }
 
@@ -130,7 +139,7 @@ export function reducer(state: DashboardState, action: Action): DashboardState {
         ...state,
         fetching: false,
         fetchError: null,
-        data: { tasks: action.parsed.tasks, issues: action.parsed.issues, fetchedAt: action.at },
+        data: { ...action.parsed, fetchedAt: action.at },
       };
     case 'fetch-failed':
       if (action.session !== state.session) return state;

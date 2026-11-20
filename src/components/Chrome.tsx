@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useFormat } from '../format.ts';
 import { STALE_AFTER_MS, type DashboardState } from '../hooks/useDashboard.ts';
 import { describeTimeZone, formatRelative, formatTimeOrTimestamp } from '../lib/dates.ts';
-import type { DataIssue } from '../lib/tasks.ts';
+import { OPTIONAL_COLUMNS, type DataIssue, type OptionalField, type SheetColumns } from '../lib/tasks.ts';
 
 export function Header({ sheetHref, onSignOut }: { sheetHref: string | null; onSignOut?: () => void }) {
   return (
@@ -177,16 +177,41 @@ export function DataIssues({ issues }: { issues: DataIssue[] }) {
   );
 }
 
-export function Footer({ now, onRevoke }: { now: number; onRevoke?: () => void }) {
+/** Which optional columns the header row has, so a mistyped header is easy to spot. */
+function OptionalColumns({ columns }: { columns: SheetColumns }) {
+  const fields = Object.keys(OPTIONAL_COLUMNS) as OptionalField[];
+  const names = (present: boolean) =>
+    fields.filter((field) => columns[field] === present).map((field) => OPTIONAL_COLUMNS[field]);
+  const found = names(true);
+  const missing = names(false);
+  return (
+    <p>
+      Optional columns found in the Tasks tab: {found.length > 0 ? found.join(', ') : 'none'}.
+      {missing.length > 0 ? ` Not found, so not shown: ${missing.join(', ')}.` : null}
+    </p>
+  );
+}
+
+export function Footer({
+  now,
+  onRevoke,
+  columns,
+}: {
+  now: number;
+  onRevoke?: () => void;
+  /** Set once the sheet has been read. */
+  columns?: SheetColumns;
+}) {
   const format = useFormat();
   const [confirming, setConfirming] = useState(false);
   return (
     <footer className="site-footer">
       <div className="site-footer__inner">
         <p>
-          Times are shown in your timezone, {describeTimeZone(new Date(now), format)}. Deadlines are calendar dates
-          and are the same everywhere.
+          Times are shown in your timezone, {describeTimeZone(new Date(now), format)}. Recorded dates are calendar
+          dates and are the same everywhere.
         </p>
+        {columns ? <OptionalColumns columns={columns} /> : null}
         <p>
           Read-only: this dashboard can’t change the sheet, and it updates only when it fetches the sheet again. Your
           tasks and Google sign-in are kept in this tab’s memory only and are cleared when you sign out or close the

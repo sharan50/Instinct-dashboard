@@ -8,6 +8,7 @@ import {
   formatTimestamp,
   parseCalendarDate,
   parseTimestamp,
+  relativeDay,
   todayIn,
 } from './dates.ts';
 
@@ -109,5 +110,19 @@ describe('formatRelative', () => {
     ['2026-10-17T12:00:00Z', '4 days ago'],
   ])('%s is %s', (iso, expected) => {
     expect(formatRelative(new Date(iso), now, options)).toBe(expected);
+  });
+});
+
+describe('relativeDay', () => {
+  it('says where a date is relative to today without calling it due or late', () => {
+    expect([-30, -2, -1, 0, 1, 2, 30].map(relativeDay)).toEqual([
+      '30 days ago',
+      '2 days ago',
+      'yesterday',
+      'today',
+      'tomorrow',
+      'in 2 days',
+      'in 30 days',
+    ]);
   });
 });

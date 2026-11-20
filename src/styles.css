@@ -398,7 +398,8 @@ code {
 
 .technical summary,
 .help summary,
-.data-issues summary {
+.data-issues summary,
+.order-help summary {
   display: list-item;
   padding: 0.65rem 0;
   font-weight: 600;
@@ -613,9 +614,16 @@ code {
   color: #6a7a79;
 }
 
+/*
+ * Segmented radio buttons: the view switch (All tasks, By date and the two
+ * origin views) and the sort order. Compact on small screens, and the options
+ * wrap onto another line rather than push the page wider than the screen.
+ */
 .view-switch {
   display: inline-flex;
+  flex-wrap: wrap;
   align-self: flex-start;
+  max-width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 3px;
@@ -627,6 +635,7 @@ code {
 .view-switch__option {
   position: relative;
   display: inline-flex;
+  flex: 1 1 auto;
 }
 
 .view-switch__option input {
@@ -640,10 +649,14 @@ code {
 .view-switch__option span {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 100%;
   min-height: 40px;
-  padding: 0.35rem 1rem;
+  padding: 0.35rem 0.5rem;
   border-radius: 8px;
+  font-size: 0.9rem;
   font-weight: 600;
+  white-space: nowrap;
   color: var(--teal-dark);
   cursor: pointer;
 }
@@ -658,19 +671,87 @@ code {
   outline-offset: 2px;
 }
 
-.overdue-note {
+/* Sort order and its explanation */
+
+.controls__order {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  max-width: 100%;
+}
+
+.sort__label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.order-help {
+  max-width: 72ch;
+  font-size: 0.925rem;
+}
+
+.order-help summary {
+  padding: 0.5rem 0;
+  color: var(--teal-dark);
+}
+
+.order-help > p,
+.order-help > ol {
+  margin-bottom: 0.5rem;
+}
+
+.order-help ol {
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.origin-note {
+  margin-top: -0.4rem;
+  color: var(--text-muted);
+  font-size: 0.925rem;
+}
+
+.origin-note strong {
+  color: var(--text);
+}
+
+/*
+ * Recorded dates that have passed. Amber by default: a recorded date may be a
+ * planning or check date. Red only when the sheet marks at least one as verified.
+ */
+.date-note {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem 0.75rem;
   padding: 0.25rem 0.9rem;
-  border: 1px solid var(--red-border);
+  border: 1px solid var(--amber-border);
   border-radius: 10px;
+  background: var(--amber-bg);
+  color: var(--amber-text);
+}
+
+.date-note .btn-link {
+  color: var(--amber-text);
+}
+
+.date-note--verified {
+  border-color: var(--red-border);
   background: var(--red-bg);
   color: var(--red-text);
 }
 
-.overdue-note .btn-link {
+.date-note--verified .btn-link {
   color: var(--red-text);
 }
 
@@ -739,7 +820,7 @@ code {
 
 .task-meta > div {
   display: grid;
-  grid-template-columns: 6.25rem minmax(0, 1fr);
+  grid-template-columns: 7.25rem minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -749,6 +830,42 @@ code {
 
 .task-meta dd {
   overflow-wrap: anywhere;
+}
+
+/* "Why this order": the reason a task sits where it does in Financial priority. */
+
+.why-order {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.why-order__label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Progress, Money at stake, Hands-on effort and Expected finish, as written in the sheet. */
+
+.task-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.task-details .task-meta {
+  width: 100%;
+}
+
+.detail-text {
+  white-space: pre-wrap;
+}
+
+.detail-note {
+  display: block;
+  font-size: 0.85rem;
 }
 
 /* Badges */
@@ -788,7 +905,7 @@ code {
 }
 
 .badge--unknown,
-.badge--overdue {
+.badge--past-verified {
   background: var(--red-bg);
   border-color: var(--red-border);
   color: var(--red-text);
@@ -806,8 +923,41 @@ code {
   color: var(--teal-dark);
 }
 
-.badge--unknown {
+.badge--unknown,
+.badge--wrap {
   white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.badge--origin {
+  background: var(--surface);
+  border-color: var(--border-strong);
+}
+
+/* The sheet's "Date verified" column: solid only for a verified date. */
+.badge--verified {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #ffffff;
+}
+
+.badge--unverified {
+  background: var(--surface);
+  border-style: dashed;
+  border-color: var(--border-strong);
+}
+
+/* The sheet's "Delay-cost basis". Never red: the basis is the sheet's label, not a checked loss. */
+.badge--basis-top {
+  background: var(--amber-bg);
+  border-color: var(--amber-border);
+  color: var(--amber-text);
+}
+
+.badge--basis-opportunity {
+  background: var(--indigo-bg);
+  border-color: var(--indigo-border);
+  color: var(--indigo-text);
 }
 
 /* Links to delivered work */
@@ -938,12 +1088,12 @@ code {
 }
 
 .deadline-group--overdue .deadline-group__title {
-  color: var(--red-text);
+  color: var(--amber-text);
 }
 
 .deadline-group--overdue .deadline-group__title .count {
-  background: var(--red-bg);
-  color: var(--red-text);
+  background: var(--amber-bg);
+  color: var(--amber-text);
 }
 
 .deadline-group__empty {
@@ -1075,6 +1225,30 @@ code {
   padding: 0;
 }
 
+.task-table .why-order {
+  margin-top: 0.3rem;
+  font-weight: 400;
+}
+
+/* In the table the labelled lines sit above the notes, each label over its text. */
+.task-table .task-details {
+  margin-bottom: 0.35rem;
+}
+
+.task-table .task-details .task-meta {
+  gap: 0.35rem;
+}
+
+.task-table .task-details .task-meta > div {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.task-table .task-details dt {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* Long status names wrap inside their column instead of spilling into the next one. */
 .task-table .badge {
   white-space: normal;
@@ -1108,23 +1282,83 @@ code {
   width: 24%;
 }
 
+/* With the labelled lines, the last column needs the room. */
+.task-table--details .col-task {
+  width: 21%;
+}
+
+.task-table--details .col-status {
+  width: 12%;
+}
+
+.task-table--details .col-deadline {
+  width: 14%;
+}
+
+.task-table--details .col-updated {
+  width: 14%;
+}
+
+.task-table--details .col-notes {
+  width: 32%;
+}
+
+/*
+ * On phones the four views are laid out two by two. Whether they would fit on
+ * one line depends on the phone's font and text size; this looks the same on all.
+ */
+@media (max-width: 479px) {
+  .view-switch--views {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-self: stretch;
+  }
+}
+
 @media (min-width: 600px) {
   .controls__row {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-end;
+  }
+
+  .search {
+    flex-basis: 16rem;
   }
 
   .view-switch {
     align-self: auto;
   }
 
+  .view-switch__option span {
+    padding: 0.35rem 1rem;
+    font-size: 1rem;
+  }
+
   .task-meta > div {
-    grid-template-columns: 7rem minmax(0, 1fr);
+    grid-template-columns: 8rem minmax(0, 1fr);
   }
 }
 
 @media (min-width: 960px) {
   .page-title {
     font-size: 1.75rem;
+  }
+}
+
+/* On the widest screens the last table column has room for each label beside its text. */
+@media (min-width: 1200px) {
+  .task-table .task-details .task-meta {
+    gap: 0.2rem;
+  }
+
+  .task-table .task-details .task-meta > div {
+    grid-template-columns: 7.25rem minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .task-table .task-details dt {
+    font-size: inherit;
+    font-weight: 400;
   }
 }
