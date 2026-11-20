@@ -19,7 +19,7 @@ export function sampleValues(): string[][] {
   ];
 }
 
-/** Every column the dashboard knows: the required ones, Links, and the optional planning columns. */
+/** The required columns, Links, and the optional planning columns (see LIFE_HEADER for the rest). */
 export const FULL_HEADER = [
   ...HEADER,
   'Links',
@@ -64,6 +64,103 @@ export function planningValues(): string[][] {
   ];
 }
 
+/** Every column the dashboard knows: FULL_HEADER plus Area, Start and Next step. */
+export const LIFE_HEADER = [...FULL_HEADER, 'Area', 'Start', 'Next step'];
+
+/** Long enough to be folded. The word "screwdriver" is in the folded part. */
+export const LONG_NEXT_STEP =
+  'Ask again on Friday, and if there is still no answer write to the managing agent with the photos of the latch, ' +
+  'then borrow a screwdriver and fit a temporary catch.';
+
+/**
+ * Invented rows that use Area, Start and Next step, for the Today and Review
+ * views. Dates assume "today" is 2026-10-21 (times shown in India).
+ *
+ * Today: Your move L02, L01. Next 7 days L04, L03, L11, L10. Chase L05, L06.
+ * L07 is in none of the three; L08 has not started; L09 is done.
+ * Review: L05 (two flags), L10, L04, L07.
+ */
+export function lifeValues(): string[][] {
+  const stamp = '2026-10-20T09:00:00+05:30';
+  const row = (
+    id: string,
+    title: string,
+    status: string,
+    deadline: string,
+    lastUpdate: string,
+    extra: { notes?: string; basis?: string; verified?: string; area?: string; start?: string; next?: string } = {},
+  ) => [
+    id,
+    title,
+    status,
+    deadline,
+    lastUpdate,
+    extra.notes ?? '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    extra.basis ?? '',
+    '',
+    extra.verified ?? '',
+    extra.area ?? '',
+    extra.start ?? '',
+    extra.next ?? '',
+  ];
+  return [
+    LIFE_HEADER,
+    row('L01', 'Book the boiler service', 'waiting on you', '', stamp, {
+      notes: 'The engineer prefers mornings.',
+      area: 'Home',
+      next: 'Ring the engineer for a slot',
+    }),
+    row('L02', 'Reply to the school trip form', 'waiting on you', '2026-10-23', stamp, {
+      basis: 'deadline',
+      verified: 'verified',
+      area: 'Family',
+      next: 'Sign it and hand it in',
+    }),
+    row('L03', 'Collect the dry cleaning', 'open', '2026-10-22', stamp, {
+      verified: 'planning',
+      area: 'Home',
+      next: 'Pick it up after work',
+    }),
+    // A verified date, later than L03's planning date. No next step.
+    row('L04', 'Renew the railcard', 'open', '2026-10-27', stamp, { verified: 'verified', area: 'Travel' }),
+    // Waiting, no date, and quiet for 41 days.
+    row('L05', 'Landlord to fix the gate latch', 'waiting on someone else', '', '2026-09-10T10:00:00+05:30', {
+      area: 'Home',
+      next: LONG_NEXT_STEP,
+    }),
+    // Waiting with a date well ahead. Its area is written in lower case.
+    row('L06', 'Garage to send the invoice', 'waiting on someone else', '2026-11-15', '2026-10-14T10:00:00+05:30', {
+      area: 'car',
+      next: 'Wait for the email',
+    }),
+    // Not waiting on anyone, no date, no area.
+    row('L07', 'Sort the photo albums', 'open', '', '2026-10-01T10:00:00+05:30', { next: 'Pick a weekend' }),
+    // Cannot start yet.
+    row('L08', 'Plan the spring allotment beds', 'open', '', stamp, {
+      area: 'Garden',
+      start: '2026-11-10',
+      next: 'Order the seed catalogue',
+    }),
+    row('L09', 'Return the library books', 'done', '2026-10-10', stamp, { area: 'Home', next: 'Nothing left' }),
+    // Started a week ago, and nobody recorded an update.
+    row('L10', 'Swap the winter tyres', 'open', '2026-10-25', '', {
+      area: 'Car',
+      start: '2026-10-15',
+      next: 'Book the garage',
+    }),
+    // Waiting on someone else, but with a date this week: listed under the date, not under Chase.
+    row('L11', 'Chase the deposit refund', 'waiting on someone else', '2026-10-24', '2026-10-18T10:00:00+05:30', {
+      area: 'Home',
+      next: 'Check the bank statement',
+    }),
+  ];
+}
+
 /** A task with every field blank or at its default, for tests that build tasks by hand. */
 export function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -91,6 +188,10 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     rawBasis: '',
     dateVerification: 'unknown',
     rawDateVerification: '',
+    area: '',
+    start: null,
+    rawStart: '',
+    nextStep: '',
     ...overrides,
   };
 }

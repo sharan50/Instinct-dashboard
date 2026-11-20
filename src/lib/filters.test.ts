@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { HEADER, LONG_PROGRESS, makeTask, planningValues, sampleValues } from '../test/fixtures.ts';
+import { HEADER, lifeValues, LONG_NEXT_STEP, LONG_PROGRESS, makeTask, planningValues, sampleValues } from '../test/fixtures.ts';
 import { parseCalendarDate, type CalendarDate } from './dates.ts';
 import {
+  countByArea,
   countByOrigin,
   countByStatus,
   deadlineState,
   DEFAULT_STATUS_FILTER,
   filterTasks,
   groupByDeadline,
+  hasFoldedText,
+  isListView,
+  isNotStarted,
+  matchesOnlyBehindDetails,
   matchesOnlyInFoldedText,
   matchesOnlyInNotes,
   matchesSearch,
@@ -15,7 +20,7 @@ import {
   viewOrigin,
   type StatusKey,
 } from './filters.ts';
-import { parseTaskSheet, type Task } from './tasks.ts';
+import { areaKey, parseTaskSheet, type Task } from './tasks.ts';
 
 const today = parseCalendarDate('2026-10-21') as CalendarDate;
 const sample = () => parseTaskSheet(sampleValues()).tasks;
@@ -160,6 +165,13 @@ describe('origin views', () => {
     expect(viewOrigin('inbound')).toBe('inbound');
     expect(viewOrigin('list')).toBeNull();
     expect(viewOrigin('deadlines')).toBeNull();
+    expect(viewOrigin('today')).toBeNull();
+    expect(viewOrigin('review')).toBeNull();
+  });
+
+  it('knows which views are lists with status chips', () => {
+    expect((['list', 'deadlines', 'you-requested', 'inbound'] as const).map(isListView)).toEqual([true, true, true, true]);
+    expect((['today', 'review'] as const).map(isListView)).toEqual([false, false]);
   });
 
   it('shows only the matching origin, whatever its letter case in the sheet', () => {
@@ -237,5 +249,133 @@ describe('search in the free-text lines', () => {
     ).toBe(false);
     // The start of a folded text is on screen too.
     expect(matchesOnlyInFoldedText(task({ progress: LONG_PROGRESS }), 'downloaded')).toBe(false);
+  });
+});
+
+describe('areas', () => {
+  const life = () => parseTaskSheet(lifeValues()).tasks;
+  const ALL = new Set<StatusKey>(['open', 'waiting on you', 'waiting on someone else', 'done', 'unknown']);
+
+  it('compares areas without regard to letter case or extra spaces', () => {
+    expect(areaKey('Home')).toBe(areaKey('  hOmE '));
+    expect(areaKey('Home  office')).toBe('home office');
+    expect(areaKey('')).toBe('');
+    expect(areaKey('   ')).toBe('');
+  });
+
+  it('lists the areas in use A to Z with their counts, then the tasks with no area', () => {
+    expect(countByArea(life())).toEqual([
+      // "car" and "Car" are one area, named as its first row writes it.
+      { key: 'car', name: 'car', count: 2, notDone: 2 },
+      { key: 'family', name: 'Family', count: 1, notDone: 1 },
+      { key: 'garden', name: 'Garden', count: 1, notDone: 1 },
+      // One of the five Home tasks is done.
+      { key: 'home', name: 'Home', count: 5, notDone: 4 },
+      { key: 'travel', name: 'Travel', count: 1, notDone: 1 },
+      { key: '', name: '', count: 1, notDone: 1 },
+    ]);
+  });
+
+  it('leaves out "no area" when every task has one, and gives one entry when the sheet has no Area column', () => {
+    expect(countByArea(life().filter((t) => t.area !== '')).map((area) => area.key)).not.toContain('');
+    expect(countByArea(sample())).toEqual([{ key: '', name: '', count: 6, notDone: 5 }]);
+    expect(countByArea([])).toEqual([]);
+  });
+
+  it('filters to one area, to the tasks with no area, or to every area', () => {
+    const inArea = (area: string | null | undefined) => ids(filterTasks(life(), { statuses: ALL, query: '', area }));
+    expect(inArea('home')).toEqual(['L01', 'L03', 'L05', 'L09', 'L11']);
+    expect(inArea('car')).toEqual(['L06', 'L10']);
+    expect(inArea('')).toEqual(['L07']);
+    expect(inArea(null)).toHaveLength(11);
+    expect(inArea(undefined)).toHaveLength(11);
+    expect(inArea('nowhere')).toEqual([]);
+  });
+
+  it('combines with the status filters, the origin and the search', () => {
+    expect(ids(filterTasks(life(), { statuses: DEFAULT_STATUS_FILTER, query: '', area: 'home' }))).toEqual(['L01', 'L03', 'L05', 'L11']);
+    expect(ids(filterTasks(life(), { statuses: DEFAULT_STATUS_FILTER, query: 'deposit', area: 'home' }))).toEqual(['L11']);
+    expect(ids(filterTasks(life(), { statuses: DEFAULT_STATUS_FILTER, query: 'deposit', area: 'car' }))).toEqual([]);
+    expect(filterTasks(life(), { statuses: ALL, query: '', area: 'home', origin: 'inbound' })).toEqual([]);
+  });
+
+  it('finds a task by its area and by its next step', () => {
+    const find = (query: string) => ids(filterTasks(life(), { statuses: DEFAULT_STATUS_FILTER, query }));
+    expect(find('travel')).toEqual(['L04']);
+    expect(find('engineer slot')).toEqual(['L01']);
+    expect(find('seed catalogue')).toEqual(['L08']);
+  });
+});
+
+describe('start dates', () => {
+  const life = () => parseTaskSheet(lifeValues()).tasks;
+  const starting = (iso: string, overrides: Partial<Task> = {}) => task({ start: parseCalendarDate(iso), rawStart: iso, ...overrides });
+
+  it('counts a task as not started only while its Start date is ahead', () => {
+    expect(isNotStarted(starting('2026-10-22'), today)).toBe(true);
+    // Starting today, or earlier, is started.
+    expect(isNotStarted(starting('2026-10-21'), today)).toBe(false);
+    expect(isNotStarted(starting('2026-10-01'), today)).toBe(false);
+  });
+
+  it('treats a blank or unreadable Start as started, and a done task as never waiting to start', () => {
+    expect(isNotStarted(task(), today)).toBe(false);
+    expect(isNotStarted(task({ rawStart: 'next spring' }), today)).toBe(false);
+    expect(isNotStarted(starting('2027-01-01', { status: 'done' }), today)).toBe(false);
+  });
+
+  it('leaves not-started tasks out only when asked to', () => {
+    const active = (startedBy?: CalendarDate | null) => ids(filterTasks(life(), { statuses: DEFAULT_STATUS_FILTER, query: '', startedBy }));
+    expect(active()).toContain('L08');
+    expect(active(null)).toContain('L08');
+    expect(active(today)).not.toContain('L08');
+    // L10 started a week ago, so it stays.
+    expect(active(today)).toContain('L10');
+    // On the day it starts, L08 is back.
+    expect(active(parseCalendarDate('2026-11-10'))).toContain('L08');
+  });
+});
+
+describe('what a short card keeps behind "Show details"', () => {
+  const short = task({
+    id: 'L01',
+    title: 'Book the boiler service',
+    area: 'Home',
+    nextStep: 'Ring the engineer',
+    notes: 'Prefers mornings.',
+    rawLinks: 'Manual: https://example.org/boiler',
+    progress: 'Quote agreed.',
+    moneyAtStake: 'Call-out fee',
+    effort: 'Ten minutes',
+    expectedFinish: 'Next week',
+  });
+
+  it('flags a match in the notes, links or labelled lines', () => {
+    for (const word of ['mornings', 'manual', 'quote', 'call-out', 'ten', 'next week']) {
+      expect(matchesOnlyBehindDetails(short, word), word).toBe(true);
+    }
+  });
+
+  it('does not flag a match that is on the card: Task ID, name, area or next step', () => {
+    for (const word of ['L01', 'boiler', 'home', 'engineer', 'ring home boiler']) {
+      expect(matchesOnlyBehindDetails(short, word), word).toBe(false);
+    }
+    expect(matchesOnlyBehindDetails(short, '')).toBe(false);
+    expect(matchesOnlyBehindDetails(short, 'dentist')).toBe(false);
+  });
+
+  it('flags a match in the folded part of a long next step, which the card cuts short', () => {
+    const long = task({ nextStep: LONG_NEXT_STEP });
+    expect(matchesOnlyBehindDetails(long, 'screwdriver')).toBe(true);
+    expect(matchesOnlyBehindDetails(long, 'friday')).toBe(false);
+    expect(matchesOnlyInFoldedText(long, 'screwdriver')).toBe(true);
+  });
+
+  it('knows when a task has long text to fold', () => {
+    expect(hasFoldedText(short)).toBe(false);
+    expect(hasFoldedText(task({ nextStep: LONG_NEXT_STEP }))).toBe(true);
+    expect(hasFoldedText(task({ progress: LONG_PROGRESS }))).toBe(true);
+    // Notes have their own toggle.
+    expect(hasFoldedText(task({ notes: LONG_PROGRESS }))).toBe(false);
   });
 });

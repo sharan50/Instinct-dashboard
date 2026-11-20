@@ -62,6 +62,9 @@ export const OPTIONAL_COLUMNS = {
   basis: 'Delay-cost basis',
   expectedFinish: 'Expected finish incl. waits',
   dateVerification: 'Date verified',
+  area: 'Area',
+  start: 'Start',
+  nextStep: 'Next step',
 } as const;
 
 type Field = keyof typeof COLUMNS;
@@ -74,6 +77,9 @@ export type SheetColumns = Record<OptionalField, boolean>;
 
 /** The free-text columns shown as labelled lines on each task, in display order. */
 export const DETAIL_FIELDS = ['progress', 'moneyAtStake', 'effort', 'expectedFinish'] as const;
+
+/** Every free-text column a task shows as written: searched, and folded when long. */
+export const TEXT_FIELDS = ['nextStep', ...DETAIL_FIELDS] as const;
 
 /** True when the sheet has a column that adds a labelled line (or the basis badge) to each task. */
 export function hasDetailColumns(columns: SheetColumns): boolean {
@@ -123,6 +129,16 @@ export interface Task {
   /** "unknown" when the cell is blank; null when it holds something other than the three values. */
   dateVerification: DateVerification | null;
   rawDateVerification: string;
+  /** The part of life the task belongs to ("Area"), as written. Blank when the cell is. */
+  area: string;
+  /**
+   * The first day the task can be acted on ("Start"). null when the cell is
+   * blank or not a date: the task then counts as started.
+   */
+  start: CalendarDate | null;
+  rawStart: string;
+  /** The very next thing to do ("Next step"), as written. */
+  nextStep: string;
 }
 
 export type IssueKind =
@@ -137,6 +153,7 @@ export type IssueKind =
   | 'unknown-basis'
   | 'unknown-date-verification'
   | 'verified-without-date'
+  | 'bad-start'
   | 'row-limit';
 
 /** A problem with one row (or the sheet's size) that does not stop the dashboard. */
@@ -169,6 +186,14 @@ const DASHES = /[‐-―−]/g;
 
 function normalizeLabel(value: string): string {
   return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * How an Area is compared: "Home", "home" and " HOME " are one area. A blank
+ * cell gives "", which stands for "no area".
+ */
+export function areaKey(area: string): string {
+  return normalizeLabel(area);
 }
 
 /** Headers also match when a hyphen was typed as another dash ("Hands–on effort"). */
@@ -260,8 +285,8 @@ function mapHeaders(headerRow: unknown[]): ColumnIndexes {
  * The API leaves out trailing empty cells (a row with no notes is one cell
  * shorter), so missing cells count as blank, and so does every cell of an
  * optional column the sheet does not have. Completely blank rows are skipped.
- * Rows with a bad status, deadline, timestamp, origin, basis or "Date
- * verified" value are kept and reported as issues rather than hidden.
+ * Rows with a bad status, deadline, timestamp, origin, basis, "Date verified"
+ * or start value are kept and reported as issues rather than hidden.
  */
 export function parseTaskSheet(values: unknown): ParsedSheet {
   if (!Array.isArray(values) || values.length === 0) {
@@ -295,6 +320,7 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
     const rawOrigin = cell('origin');
     const rawBasis = cell('basis');
     const rawDateVerification = cell('dateVerification');
+    const rawStart = cell('start');
     const label = id ? `Row ${rowNumber} (${id})` : `Row ${rowNumber}`;
 
     if (!id) issues.push({ kind: 'missing-id', rowNumber, message: `${label} has no Task ID.` });
@@ -363,6 +389,15 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
       });
     }
 
+    const start = rawStart ? parseCalendarDate(rawStart) : null;
+    if (rawStart && !start) {
+      issues.push({
+        kind: 'bad-start',
+        rowNumber,
+        message: `${label}: start “${rawStart}” is not a date written as YYYY-MM-DD. The task is treated as started.`,
+      });
+    }
+
     tasks.push({
       key: '',
       rowNumber,
@@ -388,6 +423,10 @@ export function parseTaskSheet(values: unknown): ParsedSheet {
       rawBasis,
       dateVerification,
       rawDateVerification,
+      area: cell('area'),
+      start,
+      rawStart,
+      nextStep: cell('nextStep'),
     });
   });
 

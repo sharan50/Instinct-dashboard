@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addDays,
   daysBetween,
   describeTimeZone,
   formatCalendarDate,
@@ -124,5 +125,24 @@ describe('relativeDay', () => {
       'in 2 days',
       'in 30 days',
     ]);
+  });
+});
+
+describe('addDays', () => {
+  it('moves a calendar date forward and back across months, years and leap days', () => {
+    expect(addDays(date('2026-10-21'), 1).iso).toBe('2026-10-22');
+    expect(addDays(date('2026-10-31'), 1)).toEqual({ year: 2026, month: 11, day: 1, iso: '2026-11-01' });
+    expect(addDays(date('2026-12-31'), 1).iso).toBe('2027-01-01');
+    expect(addDays(date('2028-02-28'), 1).iso).toBe('2028-02-29');
+    expect(addDays(date('2027-02-28'), 1).iso).toBe('2027-03-01');
+    expect(addDays(date('2026-03-01'), -1).iso).toBe('2026-02-28');
+    expect(addDays(date('2026-10-21'), 0).iso).toBe('2026-10-21');
+  });
+
+  it('agrees with daysBetween', () => {
+    const start = date('2026-10-21');
+    for (const days of [-400, -1, 0, 7, 8, 365]) {
+      expect(daysBetween(start, addDays(start, days))).toBe(days);
+    }
   });
 });

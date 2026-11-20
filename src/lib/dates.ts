@@ -87,6 +87,15 @@ export function daysBetween(today: CalendarDate, date: CalendarDate): number {
   return dayNumber(date) - dayNumber(today);
 }
 
+/** The calendar date `days` after `date` (before it, when negative). */
+export function addDays(date: CalendarDate, days: number): CalendarDate {
+  const moved = utcMidnight(date.year, date.month, date.day + days);
+  const year = moved.getUTCFullYear();
+  const month = moved.getUTCMonth() + 1;
+  const day = moved.getUTCDate();
+  return { year, month, day, iso: `${pad(year, 4)}-${pad(month)}-${pad(day)}` };
+}
+
 /**
  * Where a calendar date is relative to today, in plain words: "3 days ago",
  * "yesterday", "today", "tomorrow", "in 3 days". `days` comes from daysBetween.

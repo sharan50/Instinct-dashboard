@@ -579,26 +579,39 @@ code {
   outline-offset: 2px;
 }
 
+/* Search, the area picker and the "Not started yet" toggle. The search takes a whole line on phones. */
 .controls__row {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 0.9rem;
 }
 
-.search {
+.search,
+.area-filter {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  flex: 1;
   min-width: 0;
+  max-width: 100%;
 }
 
-.search label {
+.search {
+  flex: 1 1 100%;
+}
+
+.area-filter {
+  flex: 1 1 10rem;
+}
+
+.search label,
+.area-filter label {
   font-weight: 600;
   font-size: 0.95rem;
 }
 
-.search input {
+.search input,
+.area-filter select {
   width: 100%;
   min-height: 48px;
   padding: 0.6rem 0.8rem;
@@ -610,14 +623,19 @@ code {
   font-size: 1rem;
 }
 
+.chip--not-started {
+  flex: none;
+}
+
 .search input::placeholder {
   color: #6a7a79;
 }
 
 /*
- * Segmented radio buttons: the view switch (All tasks, By date and the two
- * origin views) and the sort order. Compact on small screens, and the options
- * wrap onto another line rather than push the page wider than the screen.
+ * Segmented radio buttons: the view switch (Today, All tasks, By date, the two
+ * origin views and Review) and the sort order. Compact on small screens, and
+ * the options wrap onto another line rather than push the page wider than the
+ * screen.
  */
 .view-switch {
   display: inline-flex;
@@ -786,6 +804,18 @@ code {
   gap: 0.4rem;
 }
 
+/* Everything under the name, next step and dates. A short card keeps it closed until asked. */
+.task-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.task-card__body[hidden] {
+  display: none;
+}
+
 .task-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
@@ -821,6 +851,30 @@ code {
 
 .task-meta dd {
   overflow-wrap: anywhere;
+}
+
+/* The sheet's "Next step": the first thing to read after the name. */
+
+.next-step {
+  overflow-wrap: anywhere;
+}
+
+.next-step__label {
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+
+/* "Add to calendar", under a verified date that is today or later. */
+.calendar-link {
+  display: block;
+  width: fit-content;
+  padding: 0.3rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.start-line {
+  margin-top: 0.3rem;
 }
 
 /* "Why this order": the reason a task sits where it does in Financial priority. */
@@ -922,6 +976,14 @@ code {
 .badge--origin {
   background: var(--surface);
   border-color: var(--border-strong);
+}
+
+/* The sheet's "Area": a squarer tag, so it does not read as a status. */
+.badge--area {
+  border-radius: 6px;
+  background: var(--teal-softer);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* The sheet's "Date verified" column: solid only for a verified date. */
@@ -1090,6 +1152,62 @@ code {
   padding: 0.6rem 0.9rem;
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
+}
+
+/* Today view: three short groups, side by side on wide screens. */
+
+.today,
+.today__groups,
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.today__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.today__hint {
+  margin-top: -0.35rem;
+  font-size: 0.9rem;
+}
+
+.view-note {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+/* The way to the full list sits on its own line under the sentence. */
+.view-note .btn-link {
+  display: block;
+}
+
+/* Review view: what each task is flagged for, and how many tasks each check found. */
+
+.review {
+  gap: 0.6rem;
+}
+
+.review-flags,
+.review-checks {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.review-checks {
+  gap: 0.2rem 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.925rem;
+}
+
+.review-checks strong {
+  color: var(--text);
 }
 
 /* Empty states and data problems */
@@ -1293,26 +1411,31 @@ code {
 }
 
 /*
- * On phones the four views are laid out two by two. Whether they would fit on
- * one line depends on the phone's font and text size; this looks the same on all.
+ * On phones and small tablets the six views are laid out three by two, and a
+ * long name may take two lines. Whether they would fit on one line depends on
+ * the device's font and text size; this looks the same on all.
  */
-@media (max-width: 479px) {
+@media (max-width: 719px) {
   .view-switch--views {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-self: stretch;
+  }
+
+  .view-switch--views .view-switch__option span {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
   }
 }
 
 @media (min-width: 600px) {
-  .controls__row {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-end;
-  }
-
   .search {
     flex-basis: 16rem;
+  }
+
+  .area-filter {
+    flex: 0 1 16rem;
   }
 
   .view-switch {
@@ -1329,9 +1452,48 @@ code {
   }
 }
 
+/* Review cards: two across on tablets, three on wide screens. */
+@media (min-width: 720px) {
+  .task-cards--grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
 @media (min-width: 960px) {
   .page-title {
     font-size: 1.75rem;
+  }
+
+  .today__groups {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* In a narrow column each label sits over its text, as in the table. */
+  .today__groups .task-meta > div,
+  .task-cards--grid .task-meta > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .today__groups .task-meta,
+  .task-cards--grid .task-meta {
+    gap: 0.35rem;
+  }
+
+  .today__groups .task-meta dt,
+  .task-cards--grid .task-meta dt {
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+}
+
+@media (min-width: 1100px) {
+  .task-cards--grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
