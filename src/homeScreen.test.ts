@@ -28,14 +28,15 @@ describe('home-screen icon', () => {
     for (const icon of manifest.icons) expect(icon.type).toBe('image/png');
   });
 
-  it('opens the site in the normal browser, where Google’s sign-in window works', () => {
-    // "standalone" would open the site without the browser around it; sign-in pop-ups are unreliable there.
+  it('asks for an ordinary browser tab, not a stand-alone app window', () => {
+    // A stand-alone window is where Google's sign-in pop-up is least reliable. This is only what the
+    // site asks for: some phones open a home-screen icon as a web app whatever the manifest says.
     expect(manifest.display).toBe('browser');
     expect(indexHtml).not.toContain('apple-mobile-web-app-capable');
     expect(indexHtml).not.toContain('mobile-web-app-capable');
   });
 
-  it('uses relative addresses, so it also works when the site is served from a sub-folder', () => {
+  it('uses relative addresses inside the manifest, which do not depend on the folder the site is served from', () => {
     expect(manifest.start_url).toBe('.');
     expect(manifest.scope).toBe('.');
     for (const icon of manifest.icons) expect(icon.src).toMatch(/^icons\/[a-z0-9-]+\.png$/);

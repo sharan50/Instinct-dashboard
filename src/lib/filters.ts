@@ -77,9 +77,10 @@ export function hasFoldedText(task: Task): boolean {
 /**
  * True when the task matches the search only through what a short card keeps
  * behind "Show details": its notes, links and labelled lines. The Task ID,
- * name, area and the visible start of the next step are always on the card.
+ * name, area and next step are always on the card: the whole next step when
+ * `fullText` is set (the task's long text was opened), otherwise its visible start.
  */
-export function matchesOnlyBehindDetails(task: Task, query: string): boolean {
+export function matchesOnlyBehindDetails(task: Task, query: string, fullText = false): boolean {
   if (!query.trim() || !matchesSearch(task, query)) return false;
   const front: Task = {
     ...task,
@@ -89,7 +90,7 @@ export function matchesOnlyBehindDetails(task: Task, query: string): boolean {
     moneyAtStake: '',
     effort: '',
     expectedFinish: '',
-    nextStep: clipText(task.nextStep).text,
+    nextStep: fullText ? task.nextStep : clipText(task.nextStep).text,
   };
   return !matchesSearch(front, query);
 }

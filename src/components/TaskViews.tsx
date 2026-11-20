@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type { CalendarDate } from '../lib/dates.ts';
 import {
   groupByDeadline,
+  isNotStarted,
   matchesOnlyBehindDetails,
   matchesOnlyInFoldedText,
   matchesOnlyInNotes,
@@ -11,6 +12,7 @@ import { hasDetailColumns, OPTIONAL_COLUMNS, type SheetColumns, type Task } from
 import type { TodaySections } from '../lib/today.ts';
 import {
   AreaBadge,
+  CalendarLink,
   DetailsToggle,
   FullTextToggle,
   LastUpdate,
@@ -83,8 +85,11 @@ export function TaskCard({
   // The "why this order" line is on screen: always on a full card, and on a short one once it is open.
   const reasonUp = showReason && open;
   const full = fullText.has(task.key);
-  // A short card shows the date only when the sheet has one, and the last update only where it matters.
+  // What a short card keeps on show while closed: the date when the sheet has one, the Start
+  // while the task has not started (so it is never mistaken for one that can be done now),
+  // and the last update where it matters. Everything else is inside the part "Show details" opens.
   const dateUp = !compact || task.rawDeadline !== '';
+  const startUp = !compact || isNotStarted(task, today);
   const updateUp = !compact || showUpdate;
   const textIds = [columns.nextStep ? `${textId}-next` : '', hasDetailColumns(columns) && open ? `${textId}-details` : '']
     .filter(Boolean)
@@ -94,7 +99,7 @@ export function TaskCard({
     <div>
       <dt>Recorded date</dt>
       <dd>
-        <RecordedDate task={task} today={today} passedNote={!reasonUp} calendarLink={open} />
+        <RecordedDate task={task} today={today} passedNote={!reasonUp} calendarLink={!compact} />
       </dd>
     </div>
   );
@@ -114,6 +119,24 @@ export function TaskCard({
       </dd>
     </div>
   ) : null;
+  const originRow = columns.origin ? (
+    <div>
+      <dt>Origin</dt>
+      <dd>
+        <OriginBadge task={task} />
+      </dd>
+    </div>
+  ) : null;
+  // The rows a short card holds back until it is opened.
+  const heldBack = compact ? (
+    <>
+      {dateUp ? null : dateRow}
+      {startUp ? null : startRow}
+      {updateUp ? null : updateRow}
+      {originRow}
+    </>
+  ) : null;
+  const hasHeldBack = compact && (!dateUp || (!startUp && startRow !== null) || !updateUp || originRow !== null);
 
   return (
     <article className={task.status === 'done' ? 'task-card task-card--done' : 'task-card'} aria-labelledby={titleId}>
@@ -122,7 +145,7 @@ export function TaskCard({
         <StatusBadge task={task} />
         {task.ongoing ? <span className="badge badge--ongoing">Ongoing</span> : null}
         {columns.area ? <AreaBadge task={task} /> : null}
-        {columns.origin && open ? <OriginBadge task={task} /> : null}
+        {columns.origin && !compact ? <OriginBadge task={task} /> : null}
       </div>
       <h3 id={titleId} className="task-title">
         {task.title || '(No task name)'}
@@ -130,10 +153,10 @@ export function TaskCard({
       {flags ? <ReviewFlags flags={flags} /> : null}
       {columns.nextStep ? <NextStep task={task} full={full} id={`${textId}-next`} /> : null}
       {reasonUp && !compact ? <WhyThisOrder task={task} today={today} /> : null}
-      {dateUp || updateUp ? (
+      {dateUp || (startUp && startRow) || updateUp ? (
         <dl className="task-meta">
           {dateUp ? dateRow : null}
-          {!compact ? startRow : null}
+          {startUp ? startRow : null}
           {updateUp ? updateRow : null}
         </dl>
       ) : null}
@@ -142,21 +165,17 @@ export function TaskCard({
           task={task}
           open={open}
           controls={bodyId}
-          matches={matchesOnlyBehindDetails(task, query)}
+          matches={matchesOnlyBehindDetails(task, query, full)}
           onToggle={() => onToggleCard(task.key)}
         />
       ) : null}
+      {/* Everything "Show details" reveals is inside this part, after the toggle, so it is found by reading on. */}
       <div className="task-card__body" id={bodyId} hidden={!open}>
         {open ? (
           <>
             {reasonUp && compact ? <WhyThisOrder task={task} today={today} /> : null}
-            {compact && (!dateUp || startRow || !updateUp) ? (
-              <dl className="task-meta">
-                {!dateUp ? dateRow : null}
-                {startRow}
-                {!updateUp ? updateRow : null}
-              </dl>
-            ) : null}
+            {compact ? <CalendarLink task={task} today={today} /> : null}
+            {hasHeldBack ? <dl className="task-meta">{heldBack}</dl> : null}
             <TaskDetails task={task} columns={columns} expanded={full} id={`${textId}-details`} />
             <FullTextToggle
               task={task}
@@ -335,16 +354,20 @@ export function DeadlinesView(props: TaskViewProps) {
 
 /**
  * The "Today" view: what needs attention now, in three short groups (see
- * lib/today.ts). Each task appears once, as a short card. The line at the end
- * says how many tasks the view leaves out, so nothing is dropped silently.
+ * lib/today.ts). Each task appears once, as a short card. Tasks whose Status
+ * or Deadline cell cannot be read get a group of their own, and the lines at
+ * the end count what the view leaves out, so nothing is dropped silently.
  */
 export function TodayView({
   sections,
+  done,
   filtered,
   onSeeAll,
   ...rest
 }: Omit<TaskViewProps, 'tasks' | 'showReason'> & {
   sections: TodaySections;
+  /** Done tasks the view leaves out (of those that match the search and area). */
+  done: number;
   /** A search or an area is narrowing the view, so an empty group may only mean "no match". */
   filtered: boolean;
   onSeeAll: () => void;
@@ -379,6 +402,7 @@ export function TodayView({
       showReason: false,
     },
   ];
+  const { elsewhere, unplaced } = sections;
   return (
     <div className="today">
       <div className="today__groups">
@@ -404,22 +428,51 @@ export function TodayView({
           </section>
         ))}
       </div>
-      {sections.elsewhere > 0 ? (
-        <p className="view-note">
-          {sections.elsewhere} more {sections.elsewhere === 1 ? 'task that is not done is' : 'tasks that are not done are'}{' '}
-          not on this screen: not waiting on anyone, and no recorded date in the next 7 days.
+      {unplaced.length > 0 ? (
+        <section className="today__group" aria-labelledby="today-unplaced">
+          <h2 id="today-unplaced" className="deadline-group__title">
+            Can’t be placed <span className="count">{unplaced.length}</span>
+          </h2>
+          <p className="muted today__hint">
+            The Status or the Deadline cell of {unplaced.length === 1 ? 'this task' : 'these tasks'} cannot be read, so
+            Today cannot tell where {unplaced.length === 1 ? 'it belongs' : 'they belong'}. The problems are listed at the
+            bottom of the page.
+          </p>
+          <ul className="task-cards task-cards--grid">
+            {unplaced.map((task) => (
+              <li key={task.key}>
+                <TaskCard task={task} compact showReason={false} {...rest} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {elsewhere > 0 || done > 0 ? (
+        <div className="view-note">
+          {elsewhere > 0 ? (
+            <p>
+              {elsewhere} more {elsewhere === 1 ? 'task that is not done is' : 'tasks that are not done are'} not on
+              this screen: not waiting on anyone, and no recorded date in the next 7 days.
+            </p>
+          ) : null}
+          {done > 0 ? (
+            <p>
+              {done} done {done === 1 ? 'task is' : 'tasks are'} left out.
+            </p>
+          ) : null}
           <button type="button" className="btn-link" onClick={onSeeAll}>
             See all tasks
           </button>
-        </p>
+        </div>
       ) : null}
     </div>
   );
 }
 
 /**
- * The "Review" view: tasks that have gone quiet or are missing something (see
- * lib/review.ts), each as a short card that says what it is flagged for.
+ * The "Review" view: tasks that have gone quiet, are missing something or hold
+ * a cell that cannot be read (see lib/review.ts), each as a short card that
+ * says what it is flagged for.
  */
 export function ReviewView({
   items,
@@ -428,6 +481,9 @@ export function ReviewView({
   const { columns } = rest;
   const counts = countFlags(items);
   const checks = [
+    // Cells that cannot be read are rare, so their two lines only appear when there is something to say.
+    ...(counts['bad-status'] > 0 ? [{ label: 'No valid status', count: counts['bad-status'] }] : []),
+    ...(counts['bad-date'] > 0 ? [{ label: 'Date not readable', count: counts['bad-date'] }] : []),
     { label: `No update for ${STALE_AFTER_DAYS} days or more`, count: counts.stale },
     { label: 'No last update recorded', count: counts['no-update'] },
     { label: 'Waiting on someone else with no recorded date', count: counts['waiting-undated'] },
@@ -439,7 +495,7 @@ export function ReviewView({
       <h2 id="review-heading" className="deadline-group__title">
         Needs a look <span className="count">{items.length}</span>
       </h2>
-      <p className="muted">Tasks that are not done, have started, and have gone quiet or are missing something.</p>
+      <p className="muted">Tasks that are not done and have gone quiet or are missing something.</p>
       <ul className="review-checks">
         {checks.map((check) => (
           <li key={check.label}>

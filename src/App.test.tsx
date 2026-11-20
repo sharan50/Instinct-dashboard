@@ -57,6 +57,12 @@ async function connect(user: ReturnType<typeof userEvent.setup>) {
   if (allTasks) await user.click(allTasks);
 }
 
+/** Presses Refresh and lets the next scripted answer arrive. */
+async function refresh(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  await settle();
+}
+
 function setPageHidden(hidden: boolean) {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
   act(() => {
@@ -792,6 +798,54 @@ describe('a verified date that has passed', () => {
     expect(['Verified and passed', 'Planning and passed', 'Verified and ahead'].map(passedOn)).toEqual([1, 0, 0]);
   });
 
+  it('says so once on short cards too, closed and open, in Today and in Review', async () => {
+    const short = [
+      [...HEADER, 'Delay-cost basis', 'Date verified'],
+      ['T1', 'Mine, verified and passed', 'waiting on you', '2026-10-18', '', '', 'opportunity', 'verified'],
+      ['T2', 'Theirs, verified and passed', 'waiting on someone else', '2026-10-18', '', '', '', 'verified'],
+      ['T3', 'Theirs, planning and passed', 'waiting on someone else', '2026-10-19', '', '', '', 'planning'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(short)) });
+    await connectOnly(user);
+    const titles = ['Mine, verified and passed', 'Theirs, verified and passed', 'Theirs, planning and passed'];
+    const times = () => titles.map((title) => (card(title).textContent ?? '').split(PASSED).length - 1);
+    const openAll = async () => {
+      for (const button of screen.getAllByRole('button', { name: /^Show details for/ })) await user.click(button);
+    };
+    const closeAll = async () => {
+      for (const button of screen.getAllByRole('button', { name: /^Hide details for/ })) await user.click(button);
+    };
+
+    // Today: Your move (which shows the why line once open) and Chase (which never does).
+    expect(times()).toEqual([1, 1, 0]);
+    await openAll();
+    expect(why(card('Mine, verified and passed'))).toContain(PASSED);
+    expect(times()).toEqual([1, 1, 0]);
+    await closeAll();
+
+    // Review: all three are flagged (no update recorded), none shows the why line.
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(cardTitles().sort()).toEqual([...titles].sort());
+    expect(times()).toEqual([1, 1, 0]);
+    await openAll();
+    expect(times()).toEqual([1, 1, 0]);
+  });
+
+  it('says so once per row in the wide table, in both sort orders', async () => {
+    setWideScreen(true);
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    const times = () =>
+      ['Verified and passed', 'Planning and passed', 'Verified and ahead'].map((title) => {
+        const row = screen.getByRole('rowheader', { name: new RegExp(`^${title}`) }).closest('tr') as HTMLElement;
+        return (row.textContent ?? '').split(PASSED).length - 1;
+      });
+    expect(times()).toEqual([1, 0, 0]);
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+    expect(times()).toEqual([1, 0, 0]);
+  });
+
   it('follows the calendar: after midnight a date that was today has passed, and its move has ended', async () => {
     const today = [
       [...HEADER, 'Delay-cost basis', 'Date verified'],
@@ -1237,6 +1291,118 @@ describe('today view', () => {
     expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
   });
 
+  it('gives tasks it cannot place a group of their own, and never describes them as not waiting on anyone', async () => {
+    const values = [
+      HEADER,
+      ['T1', 'Open with no date', 'open', '', '', ''],
+      ['T2', 'Status is not one of the four', 'waiting on me', '', '', ''],
+      ['T3', 'Status is blank', '', '', '', ''],
+      ['T4', 'Date is not readable', 'open', '25/10/2026', '', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByRole('heading', { level: 2, name: 'Can’t be placed 3' })).toBeInTheDocument();
+    expect(group(/^Can’t be placed/)).toEqual(['Status is not one of the four', 'Status is blank', 'Date is not readable']);
+    expect(screen.getByText(/^The Status or the Deadline cell of these tasks cannot be read/)).toBeInTheDocument();
+    // Each card shows what is wrong with it.
+    expect(within(card('Status is not one of the four')).getByText('Unknown status: waiting on me')).toBeInTheDocument();
+    expect(within(card('Status is blank')).getByText('No status')).toBeInTheDocument();
+    expect(line(card('Date is not readable'), 'Recorded date')).toHaveTextContent('“25/10/2026” Not a YYYY-MM-DD date');
+    // Only the task that can be read is counted as "not waiting on anyone, no recorded date in the next 7 days".
+    expect(screen.getByText(/^1 more task that is not done is not on this screen: not waiting on anyone/)).toBeInTheDocument();
+    expect(screen.getByText('Showing 3 of 4 tasks')).toBeInTheDocument();
+
+    // Review flags the same cells.
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    const flagged = (title: string) => within(card(title)).getByRole('list', { name: 'Flagged for' });
+    expect(flagged('Status is not one of the four')).toHaveTextContent('No valid status');
+    expect(flagged('Date is not readable')).toHaveTextContent('Date not readable');
+    const checks = Array.from(document.querySelectorAll('.review-checks li')).map((li) => li.textContent);
+    expect(checks.slice(0, 2)).toEqual(['No valid status: 2', 'Date not readable: 1']);
+  });
+
+  it('has no group for unreadable tasks while every task can be read', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(screen.queryByRole('heading', { name: /^Can’t be placed/ })).not.toBeInTheDocument();
+  });
+
+  it('counts the done tasks it leaves out, so the numbers add up', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    // 11 tasks: 8 on screen, 1 not waiting on anyone, 1 done, and 1 not started (counted on its chip).
+    expect(screen.getByText('Showing 8 of 11 tasks')).toBeInTheDocument();
+    expect(screen.getByText(/^1 more task that is not done is not on this screen/)).toBeInTheDocument();
+    expect(screen.getByText('1 done task is left out.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' })).not.toBeChecked();
+  });
+
+  it('says a match is done instead of "no match", in Today and in Review', async () => {
+    const values = lifeValues();
+    values.push(['L12', 'Shred the old statements', 'done', '', '2026-10-20T09:00:00+05:30', '', '', '', '', '', '', '', '', '', 'Archive', '', '']);
+    const { user } = setupLife(values);
+    await connectOnly(user);
+    const done = '1 matching task is done, and this view lists only tasks that are not done. All tasks shows it when Done is ticked.';
+    await user.type(screen.getByRole('searchbox'), 'library books');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText(done)).toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(screen.getByText(done)).toBeInTheDocument();
+
+    // An area whose tasks are all done: no word was typed, so none is asked for.
+    await user.clear(screen.getByRole('searchbox'));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Area' }), 'Archive (0 not done)');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText(done)).toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'All tasks' }));
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toEqual(['Shred the old statements']);
+  });
+
+  it('opens the full list with its usual statuses from "See all tasks"', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    expect(cardTitles()).not.toContain(LIFE.L07);
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    await user.click(screen.getByRole('button', { name: 'See all tasks' }));
+    // The note promised the task that is "not on this screen": the list has to show it.
+    expect(screen.getByRole('checkbox', { name: /^Open/ })).toBeChecked();
+    expect(cardTitles()).toContain(LIFE.L07);
+  });
+
+  it('keeps everything "Show details" reveals inside the part the toggle controls', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const form = card(LIFE.L02);
+    const toggle = within(form).getByRole('button', { name: `Show details for ${LIFE.L02}` });
+    const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '') as HTMLElement;
+    const upFront = form.textContent;
+    await user.click(toggle);
+    // What opening added: the calendar link, the origin, the last update, the lines, the notes.
+    expect(within(body).getByRole('link', { name: /^Add to calendar: / })).toBeInTheDocument();
+    expect(within(body).getByText('Origin missing')).toBeInTheDocument();
+    expect(within(body).getByText('Last update')).toBeInTheDocument();
+    // Nothing outside that part changed, apart from the toggle's own arrow and label.
+    body.remove();
+    expect(form.textContent).toBe((upFront ?? '').replace('▸Show details', '▾Hide details'));
+  });
+
+  it('does not flag a match that is already on the card because its full text was opened', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const latch = card(LIFE.L05);
+    await user.click(within(latch).getByRole('button', { name: `Show details for ${LIFE.L05}` }));
+    await user.click(within(latch).getByRole('button', { name: `Show full text for ${LIFE.L05}` }));
+    await user.click(within(latch).getByRole('button', { name: `Hide details for ${LIFE.L05}` }));
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/fit a temporary catch\.$/);
+    await user.type(screen.getByRole('searchbox'), 'screwdriver');
+    expect(cardTitles()).toEqual([LIFE.L05]);
+    expect(screen.queryByText('matches your search')).not.toBeInTheDocument();
+  });
+
   it('lays the three groups out as cards on a wide screen too', async () => {
     setWideScreen(true);
     const { user } = setupLife();
@@ -1317,6 +1483,18 @@ describe('next step', () => {
     const row = within(table).getByRole('rowheader', { name: /Book the boiler service/ }).closest('tr') as HTMLElement;
     expect(within(row).getByRole('rowheader')).toHaveTextContent(/^Book the boiler service Home Origin missing$/);
     expect(row.querySelector('td:last-child')).toHaveTextContent(/^Next step: Ring the engineer for a slotWhy this order:/);
+
+    // The long next step folds in the table too, and its toggle names the two parts it opens.
+    const latch = within(table).getByRole('rowheader', { name: /Landlord to fix the gate latch/ }).closest('tr') as HTMLElement;
+    const toggle = within(latch).getByRole('button', { name: `Show full text for ${LIFE.L05}` });
+    const controlled = (toggle.getAttribute('aria-controls') ?? '').split(' ').map((id) => document.getElementById(id));
+    expect(controlled).toEqual([latch.querySelector('.next-step'), latch.querySelector('.task-details .task-meta')]);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/with the photos of the latch,…$/);
+    await user.click(toggle);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/fit a temporary catch\.$/);
+    // A Start date sits under the recorded date in the table.
+    const tyres = within(table).getByRole('rowheader', { name: /Swap the winter tyres/ }).closest('tr') as HTMLElement;
+    expect(tyres.querySelector('.start-line')).toHaveTextContent(/^Start Thu, 15 Oct 2026$/);
   });
 
   it('adds the table column for a sheet that has Next step and none of the other new columns', async () => {
@@ -1403,6 +1581,41 @@ describe('areas', () => {
     expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
   });
 
+  it('drops an area for good when the sheet no longer has it', async () => {
+    const renamed = lifeValues().map((row) => row.map((cell, index) => (index === 14 && cell === 'Travel' ? 'Trips' : cell)));
+    const { user } = setup({
+      fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(renamed), valuesResponse(lifeValues())),
+    });
+    await connect(user);
+    await user.selectOptions(picker(), 'Travel (1 not done)');
+    expect(cardTitles()).toEqual([LIFE.L04]);
+
+    // The area was renamed in the sheet: the filter is off, and nothing is left to reset.
+    await refresh(user);
+    expect(picker()).toHaveValue('ALL');
+    expect(screen.getByText('Showing 9 of 11 tasks')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+
+    // When the old name comes back, the view does not narrow by itself.
+    await refresh(user);
+    expect(picker()).toHaveValue('ALL');
+    expect(screen.getByText('Showing 9 of 11 tasks')).toBeInTheDocument();
+  });
+
+  it('drops "No area" when the sheet loses its Area column', async () => {
+    const withoutArea = lifeValues().map((row) => row.filter((_, index) => index !== 14));
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(withoutArea)) });
+    await connectOnly(user);
+    await user.selectOptions(picker(), 'No area (1 not done)');
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
+
+    await refresh(user);
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No task here matches the search or area.')).not.toBeInTheDocument();
+    expect(cardTitles()).toHaveLength(8);
+  });
+
   it('has no picker and no badge while the sheet has no Area column', async () => {
     const { user } = setupPlanning();
     await connect(user);
@@ -1464,6 +1677,67 @@ describe('start dates', () => {
     expect(screen.getByText('1 matching task has not started yet: tick “Not started yet” to see it.')).toBeInTheDocument();
     await user.click(toggle());
     expect(cardTitles()).toEqual([LIFE.L08]);
+  });
+
+  it('says so when a match is hidden by both an unticked status and its Start date', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    await user.type(screen.getByRole('searchbox'), 'allotment');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    // First the status: ticking "Not started yet" alone would not bring it back.
+    expect(screen.getByText(/^1 task matches with a status that is hidden right now/)).toBeInTheDocument();
+    expect(screen.queryByText(/not started yet: tick/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    expect(screen.getByText('1 matching task has not started yet: tick “Not started yet” to see it.')).toBeInTheDocument();
+  });
+
+  it('marks a task that has not started on its short card, and lists it in Review only when asked', async () => {
+    const values = lifeValues();
+    // Waiting on you, cannot start yet, and has no next step (a Review flag).
+    values.push(['L12', 'Renew the allotment lease', 'waiting on you', '', '2026-10-20T09:00:00+05:30', '', '', '', '', '', '', '', '', '', 'Garden', '2026-12-01', '']);
+    const { user } = setupLife(values);
+    await connectOnly(user);
+    const toggle = () => screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 2 tasks' });
+    expect(cardTitles()).not.toContain('Renew the allotment lease');
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(cardTitles()).not.toContain('Renew the allotment lease');
+
+    await user.click(toggle());
+    expect(cardTitles()).toContain('Renew the allotment lease');
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    expect(group(/^Your move/)).toContain('Renew the allotment lease');
+    // Closed, the card already says the task cannot be started yet.
+    const lease = card('Renew the allotment lease');
+    expect(within(lease).getByRole('button', { name: /^Show details for/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(line(lease, 'Start')).toHaveTextContent('Tue, 1 Dec 2026 Not started yet');
+    // A task that has started keeps its Start line behind Show details.
+    const tyres = card(LIFE.L10);
+    expect(within(tyres).queryByText('Start', { selector: 'dt' })).not.toBeInTheDocument();
+    await user.click(within(tyres).getByRole('button', { name: /^Show details for/ }));
+    expect(line(tyres, 'Start')).toHaveTextContent(/^StartThu, 15 Oct 2026$/);
+  });
+
+  it('switches the toggle off for good once no task is waiting to start', async () => {
+    const started = lifeValues().map((row) => (row[0] === 'L08' ? row.map((cell, index) => (index === 15 ? '2026-10-01' : cell)) : row));
+    const { user } = setup({
+      fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(started), valuesResponse(lifeValues())),
+    });
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' }));
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
+
+    // After a refresh the task has started: the chip goes, and so does a Reset that would have nothing to reset.
+    await refresh(user);
+    expect(screen.queryByRole('checkbox', { name: /not started/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+    expect(cardTitles()).toContain(LIFE.L08);
+
+    // If a task is waiting to start again later, the toggle is back unticked, not silently on.
+    await refresh(user);
+    expect(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' })).not.toBeChecked();
+    expect(cardTitles()).not.toContain(LIFE.L08);
   });
 
   it('never hides a done task, and treats a Start that is not a date as started, with the problem listed', async () => {
@@ -1541,11 +1815,37 @@ describe('review view', () => {
     await openReview(user);
     expect(screen.queryByRole('checkbox', { name: /^Done/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Financial priority' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/recorded date in the past/)).not.toBeInTheDocument();
     const latch = card(LIFE.L05);
     expect(line(latch, 'Last update')).toHaveTextContent('(41 days ago)');
     await user.click(within(latch).getByRole('button', { name: `Show details for ${LIFE.L05}` }));
     expect(line(latch, 'Recorded date')).toHaveTextContent('No recorded date');
+  });
+
+  it('never lists a done task, and follows the search', async () => {
+    const values = lifeValues();
+    // Done, with no area, no next step and no update: every flag would apply if done tasks were checked.
+    values.push(['L12', 'Shred the old statements', 'done', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    const { user } = setupLife(values);
+    await openReview(user);
+    expect(cardTitles()).toEqual([LIFE.L05, LIFE.L10, LIFE.L04, LIFE.L07]);
+    await user.type(screen.getByRole('searchbox'), 'tyres');
+    expect(cardTitles()).toEqual([LIFE.L10]);
+    expect(screen.getByText('Showing 1 of 12 tasks')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs a look 1' })).toBeInTheDocument();
+  });
+
+  it('leaves the count of past dates to the other views', async () => {
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Past and quiet', 'open', '2026-10-01', '', '', 'verified'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(screen.queryByText(/recorded date in the past/)).not.toBeInTheDocument();
+    // The task itself still says its verified date has passed.
+    expect(card('Past and quiet')).toHaveTextContent('The date has passed; the dashboard does not know whether a consequence applies now.');
   });
 
   it('skips the checks for columns the sheet does not have, and says so', async () => {

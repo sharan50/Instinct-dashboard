@@ -5,7 +5,8 @@ import type { Task } from './tasks.ts';
 
 /**
  * The "Today" view: what needs attention now, read from structured cells only
- * (Status, the date in Deadline, Date verified and Last update).
+ * (Status, the date in Deadline, Date verified and Last update; "Your move" is
+ * ordered by Financial priority, which also reads Delay-cost basis).
  *
  * Each task appears once, in the first group it fits:
  * 1. Your move: the status is "waiting on you".
@@ -14,16 +15,25 @@ import type { Task } from './tasks.ts';
  * 3. Chase: the rest of the tasks waiting on someone else, the longest
  *    without an update first.
  *
- * Everything else is left to the other views. `elsewhere` counts those tasks,
- * so the view can say what it leaves out. The caller passes only tasks that
- * are not done and have started.
+ * What is left is split in two, so the view never says more than it knows:
+ * `unplaced` holds the tasks whose Status or Deadline cell cannot be read
+ * (nobody can say where they belong), and `elsewhere` counts the rest, which
+ * are open with no recorded date in the next 7 days. The caller passes only
+ * tasks that are not done.
  */
 export interface TodaySections {
   yourMove: Task[];
   nextDays: Task[];
   chase: Task[];
-  /** Tasks in none of the three groups: open tasks with no recorded date in the next 7 days. */
+  /** In none of the three groups because the Status or the Deadline cell cannot be read. In sheet order. */
+  unplaced: Task[];
+  /** In none of the three groups and readable: open, with no recorded date in the next 7 days. */
   elsewhere: number;
+}
+
+/** True when the Status cell is blank or not a status, or the Deadline cell holds something that is not a date. */
+export function isUnreadable(task: Task): boolean {
+  return task.status === null || (task.rawDeadline !== '' && task.deadline === null);
 }
 
 function isSoon(task: Task, today: CalendarDate): boolean {
@@ -53,8 +63,9 @@ export function todaySections(tasks: readonly Task[], today: CalendarDate): Toda
   );
   const others = tasks.filter((task) => task.status !== 'waiting on you');
   const nextDays = others.filter((task) => isSoon(task, today)).sort(compareSoon);
-  const chase = others
-    .filter((task) => task.status === 'waiting on someone else' && !isSoon(task, today))
-    .sort(compareWaiting);
-  return { yourMove, nextDays, chase, elsewhere: tasks.length - yourMove.length - nextDays.length - chase.length };
+  const later = others.filter((task) => !isSoon(task, today));
+  const chase = later.filter((task) => task.status === 'waiting on someone else').sort(compareWaiting);
+  const rest = later.filter((task) => task.status !== 'waiting on someone else');
+  const unplaced = rest.filter(isUnreadable).sort((a, b) => a.rowNumber - b.rowNumber);
+  return { yourMove, nextDays, chase, unplaced, elsewhere: rest.length - unplaced.length };
 }

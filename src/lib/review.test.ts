@@ -46,8 +46,19 @@ describe('reviewFlags', () => {
     expect(kinds(tidy({ status: 'waiting on someone else' }))).toEqual(['waiting-undated']);
     expect(kinds(tidy({ status: 'waiting on someone else', deadline: parseCalendarDate('2026-12-01') }))).toEqual([]);
     expect(kinds(tidy({ status: 'waiting on you' }))).toEqual([]);
-    // An unreadable date is no date.
-    expect(kinds(tidy({ status: 'waiting on someone else', rawDeadline: 'soon' }))).toEqual(['waiting-undated']);
+    // A date that is written but unreadable is flagged as that, not as missing.
+    expect(kinds(tidy({ status: 'waiting on someone else', rawDeadline: 'soon' }))).toEqual(['bad-date']);
+  });
+
+  it('flags a Status or Deadline cell that cannot be read, whatever else the task has', () => {
+    expect(kinds(tidy({ status: null, rawStatus: 'paused' }))).toEqual(['bad-status']);
+    expect(kinds(tidy({ status: null, rawStatus: '' }))).toEqual(['bad-status']);
+    expect(kinds(tidy({ rawDeadline: '25/10/2026' }))).toEqual(['bad-date']);
+    expect(kinds(tidy({ status: null, rawStatus: 'paused', rawDeadline: 'Friday' }))).toEqual(['bad-status', 'bad-date']);
+    // These two do not depend on any optional column.
+    expect(kinds(tidy({ status: null, rawStatus: 'paused', area: '', nextStep: '' }), NO_COLUMNS)).toEqual(['bad-status']);
+    expect(reviewFlags(tidy({ status: null }), today, ALL_COLUMNS, INDIA).map(describeFlag)).toEqual(['No valid status']);
+    expect(reviewFlags(tidy({ rawDeadline: 'Friday' }), today, ALL_COLUMNS, INDIA).map(describeFlag)).toEqual(['Date not readable']);
   });
 
   it('flags a blank next step or area only when the sheet has that column', () => {
@@ -76,8 +87,9 @@ describe('reviewList', () => {
 
   it('counts how many tasks each check found', () => {
     const items = reviewList(active(lifeValues()), today, ALL_COLUMNS, INDIA);
-    expect(countFlags(items)).toEqual({ stale: 1, 'no-update': 1, 'waiting-undated': 1, 'no-next-step': 1, 'no-area': 1 });
-    expect(countFlags([])).toEqual({ stale: 0, 'no-update': 0, 'waiting-undated': 0, 'no-next-step': 0, 'no-area': 0 });
+    const none = { 'bad-status': 0, 'bad-date': 0, stale: 0, 'no-update': 0, 'waiting-undated': 0, 'no-next-step': 0, 'no-area': 0 };
+    expect(countFlags(items)).toEqual({ ...none, stale: 1, 'no-update': 1, 'waiting-undated': 1, 'no-next-step': 1, 'no-area': 1 });
+    expect(countFlags([])).toEqual(none);
   });
 
   it('works on a sheet with none of the optional columns', () => {

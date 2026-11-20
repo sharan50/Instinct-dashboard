@@ -1176,14 +1176,14 @@ code {
   font-size: 0.9rem;
 }
 
+/* What Today leaves out, counted, with the way to the full list on its own line. */
 .view-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
   color: var(--text-muted);
   font-size: 0.95rem;
-}
-
-/* The way to the full list sits on its own line under the sentence. */
-.view-note .btn-link {
-  display: block;
 }
 
 /* Review view: what each task is flagged for, and how many tasks each check found. */

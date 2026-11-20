@@ -3,7 +3,7 @@ import { lifeValues, makeTask, sampleValues } from '../test/fixtures.ts';
 import { parseCalendarDate, parseTimestamp, type CalendarDate } from './dates.ts';
 import { DEFAULT_STATUS_FILTER, filterTasks } from './filters.ts';
 import { parseTaskSheet, type Task } from './tasks.ts';
-import { todaySections } from './today.ts';
+import { isUnreadable, todaySections } from './today.ts';
 
 const today = parseCalendarDate('2026-10-21') as CalendarDate;
 const date = (iso: string) => parseCalendarDate(iso) as CalendarDate;
@@ -22,6 +22,51 @@ describe('todaySections', () => {
     expect(ids(sections.chase)).toEqual(['L05', 'L06']);
     // L07 is open with no date: on none of the three lists, but counted.
     expect(sections.elsewhere).toBe(1);
+    expect(sections.unplaced).toEqual([]);
+  });
+
+  it('keeps apart the tasks it cannot place: a Status or Deadline cell that cannot be read', () => {
+    const tasks = [
+      makeTask({ id: 'open-undated', rowNumber: 2 }),
+      // The status is not one of the four, or is blank: nobody can say whose move it is.
+      makeTask({ id: 'odd-status', rowNumber: 3, status: null, rawStatus: 'waiting on me' }),
+      makeTask({ id: 'no-status', rowNumber: 4, status: null, rawStatus: '' }),
+      // A date is written but cannot be read: it may well be in the next 7 days.
+      makeTask({ id: 'odd-date', rowNumber: 5, rawDeadline: '25/10/2026' }),
+      makeTask({ id: 'open-later', rowNumber: 6, deadline: date('2026-12-01'), rawDeadline: '2026-12-01' }),
+      makeTask({ id: 'open-past', rowNumber: 7, deadline: date('2026-10-01'), rawDeadline: '2026-10-01' }),
+    ];
+    const sections = todaySections(tasks, today);
+    expect(ids(sections.unplaced)).toEqual(['odd-status', 'no-status', 'odd-date']);
+    // Only the readable ones are counted as "not waiting on anyone, no recorded date in the next 7 days".
+    expect(sections.elsewhere).toBe(3);
+    expect([...sections.yourMove, ...sections.nextDays, ...sections.chase]).toEqual([]);
+  });
+
+  it('still places an unreadable task wherever a cell that can be read puts it', () => {
+    const tasks = [
+      // Waiting on you with an unreadable date: your move, whatever the date is.
+      makeTask({ id: 'mine-odd-date', rowNumber: 2, status: 'waiting on you', rawDeadline: 'Friday' }),
+      // An unknown status with a readable date this week: under the date.
+      makeTask({ id: 'odd-status-dated', rowNumber: 3, status: null, rawStatus: 'paused', deadline: date('2026-10-23'), rawDeadline: '2026-10-23' }),
+      // Waiting on someone else with an unreadable date: still someone to chase.
+      makeTask({ id: 'theirs-odd-date', rowNumber: 4, status: 'waiting on someone else', rawDeadline: 'Friday' }),
+    ];
+    const sections = todaySections(tasks, today);
+    expect(ids(sections.yourMove)).toEqual(['mine-odd-date']);
+    expect(ids(sections.nextDays)).toEqual(['odd-status-dated']);
+    expect(ids(sections.chase)).toEqual(['theirs-odd-date']);
+    expect(sections.unplaced).toEqual([]);
+    expect(sections.elsewhere).toBe(0);
+    expect(tasks.map(isUnreadable)).toEqual([true, true, true]);
+  });
+
+  it('accounts for every task it is given exactly once', () => {
+    const tasks = active(lifeValues());
+    const sections = todaySections(tasks, today);
+    const listed = [...sections.yourMove, ...sections.nextDays, ...sections.chase, ...sections.unplaced];
+    expect(new Set(ids(listed)).size).toBe(listed.length);
+    expect(listed.length + sections.elsewhere).toBe(tasks.length);
   });
 
   it('lists each task once, in the first group it fits', () => {

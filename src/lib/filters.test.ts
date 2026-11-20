@@ -371,6 +371,13 @@ describe('what a short card keeps behind "Show details"', () => {
     expect(matchesOnlyInFoldedText(long, 'screwdriver')).toBe(true);
   });
 
+  it('does not flag the long next step once its full text is open: the whole of it is on the card then', () => {
+    const long = task({ nextStep: LONG_NEXT_STEP, notes: 'Borrowed from next door.' });
+    expect(matchesOnlyBehindDetails(long, 'screwdriver', true)).toBe(false);
+    // The notes are behind the toggle either way.
+    expect(matchesOnlyBehindDetails(long, 'borrowed', true)).toBe(true);
+  });
+
   it('knows when a task has long text to fold', () => {
     expect(hasFoldedText(short)).toBe(false);
     expect(hasFoldedText(task({ nextStep: LONG_NEXT_STEP }))).toBe(true);

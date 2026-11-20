@@ -395,6 +395,17 @@ test('opens on Today: your move, the next 7 days and who to chase, as short card
   await expect(boiler.getByText('The engineer prefers mornings.')).toBeVisible();
   expect(await hasHorizontalScroll(page)).toBe(false);
 
+  // What "Show details" reveals comes after the toggle, inside the part it controls: the next Tab reaches it.
+  const form = page.getByRole('article', { name: LIFE.form });
+  await expect(form.getByRole('link', { name: /^Add to calendar: / })).toHaveCount(0);
+  const formDetails = form.getByRole('button', { name: `Show details for ${LIFE.form}` });
+  const controlled = await formDetails.getAttribute('aria-controls');
+  await formDetails.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('link', { name: /^Add to calendar: / })).toBeFocused();
+  await expect(page.locator(`[id="${controlled}"]`).getByRole('link', { name: /^Add to calendar: / })).toBeVisible();
+
   // On a wide screen the three groups sit side by side; on a phone they are stacked.
   const lefts = await page.locator('.today__group').evaluateAll((groups) => groups.map((group) => Math.round(group.getBoundingClientRect().left)));
   expect(new Set(lefts).size).toBe(testInfo.project.name === 'phone' ? 1 : 3);
@@ -402,6 +413,26 @@ test('opens on Today: your move, the next 7 days and who to chase, as short card
   await page.getByRole('button', { name: 'See all tasks' }).click();
   await expect(page.getByRole('radio', { name: 'All tasks' })).toBeChecked();
   expect(await taskNames(page)).toContain(LIFE.albums);
+});
+
+test('never passes off an unreadable status or date as "not waiting on anyone"', async ({ page }) => {
+  const values = lifeValues();
+  values.push(['L11', 'Status typed wrongly', 'waiting on me', '', '', '']);
+  values.push(['L12', 'Date typed wrongly', 'open', '25/12/2026', '', '']);
+  await mockGoogle(page, { sheets: [sheetReply(values)] });
+  await connect(page, 'Today');
+  expect(await groupNames(page, /^Can’t be placed/)).toEqual(['Status typed wrongly', 'Date typed wrongly']);
+  await expect(page.getByText('Unknown status: waiting on me')).toBeVisible();
+  await expect(page.getByText('Not a YYYY-MM-DD date')).toBeVisible();
+  // The count of readable leftovers is unchanged, and the done task is counted too.
+  await expect(page.getByText(/^1 more task that is not done is not on this screen/)).toBeVisible();
+  await expect(page.getByText('1 done task is left out.')).toBeVisible();
+  await expect(page.getByText('Showing 9 of 12 tasks')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+
+  // A search that only matches a done task says so, instead of "no match".
+  await page.getByRole('searchbox', { name: 'Search tasks and notes' }).fill('library books');
+  await expect(page.getByText(/^1 matching task is done, and this view lists only tasks that are not done\./)).toBeVisible();
 });
 
 test('filters by area and keeps tasks that have not started behind a count', async ({ page }) => {
@@ -415,7 +446,8 @@ test('filters by area and keeps tasks that have not started behind a count', asy
   await notStarted.check({ force: true });
   await expect(page.getByText('Showing 9 of 10 tasks')).toBeVisible();
   expect(await taskNames(page)).toContain(LIFE.beds);
-  await expect(page.getByText('Not started yet', { exact: true }).last()).toBeVisible();
+  // The badge on the task itself, not the chip's own label.
+  await expect(page.locator('.task-card .badge, .task-table .badge').filter({ hasText: 'Not started yet' })).toHaveCount(1);
   await notStarted.uncheck({ force: true });
 
   const area = page.getByRole('combobox', { name: 'Area' });
@@ -489,7 +521,7 @@ test('offers "Add to calendar" for verified upcoming dates, as a plain link to G
   expect([...hosts]).not.toContain('calendar.google.com');
 });
 
-test('can be put on a phone’s home screen, without becoming an installed app', async ({ page, request }) => {
+test('serves a web manifest and icons for a home-screen shortcut, and asks for a browser tab', async ({ page, request }) => {
   await mockGoogle(page);
   await page.goto('/');
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
@@ -498,7 +530,7 @@ test('can be put on a phone’s home screen, without becoming an installed app',
   const reply = await request.get('/manifest.webmanifest');
   expect(reply.status()).toBe(200);
   const manifest = (await reply.json()) as { display: string; start_url: string; icons: { src: string; sizes: string }[] };
-  // Opens in the normal browser, where Google's sign-in window works.
+  // What the site asks for; some phones open a home-screen icon as a web app regardless.
   expect(manifest.display).toBe('browser');
   for (const path of [...manifest.icons.map((icon) => `/${icon.src}`), '/icons/apple-touch-icon.png']) {
     const icon = await request.get(path);

@@ -27,27 +27,31 @@ waiting on you, what has a date in the next 7 days, and who to chase.
   - **Today** (where the dashboard opens) has three short groups. **Your move**: tasks waiting on you. **Next 7
     days**: other tasks with a recorded date from today to 7 days ahead, verified dates first. **Chase**: other
     tasks waiting on someone else, the longest without an update first. Each task appears once, as a short card
-    with its next step; **Show details** opens the rest. A line at the bottom says how many tasks that are not done
-    are in none of the three groups, so nothing is dropped silently.
+    with its next step; **Show details** opens the rest. A task whose Status or Deadline cell can't be read is
+    listed in a fourth group, **Can't be placed**. Lines at the bottom count what is left out: tasks that are not
+    done but in none of the groups, and done tasks.
   - **All tasks** lists every task. **By date** groups tasks by their recorded date: Recorded date passed, Next 7
     days, Later, Ongoing (no fixed date) and No recorded date.
   - **You requested** and **Inbound** show the tasks with that value in the sheet's Origin column. A task with a
     blank or unrecognised Origin stays in All tasks and By date, and an **Origin missing** count says how many
     there are.
   - **Review** lists tasks that have gone quiet or are missing something: no update for 30 days, no last update
-    recorded, waiting on someone else with no recorded date, no next step, or no area. Each task says what it is
-    flagged for. See [How Today and Review choose tasks](#how-today-and-review-choose-tasks).
+    recorded, waiting on someone else with no recorded date, no next step, no area, or a status or date that can't
+    be read. Each task says what it is flagged for. See
+    [How Today and Review choose tasks](#how-today-and-review-choose-tasks).
 - **Counts by status**, as chips you can tick or untick, in All tasks, By date, You requested and Inbound: Open,
   Waiting on you, Waiting on someone else and Done. Active tasks show by default; tick **Done** to include
   finished ones. The counts are for the view and area on screen. Today and Review choose from the tasks that are
   not done, so they have no chips.
 - **Search** across Task ID, task name, area, notes, links, the next step and the progress lines. It works in
   every view.
-- **Next step.** The sheet's Next step column is the first line under each task's name.
+- **Next step.** The sheet's Next step column is shown straight under each task's name on a card (after the flags,
+  in Review) and at the top of the last column of the wide table.
 - **Area.** The sheet's Area column (for example Home, Health, Work) shows as a tag on each task, and an **Area**
   picker narrows every view to one area. The picker says how many tasks in each area are not done.
 - **Start.** A task whose Start date is still ahead is left out of every view until you tick **Not started yet**.
-  The chip shows how many such tasks there are, so they stay visible as a count.
+  The chip shows how many such tasks there are, so they stay visible as a count. Once shown, such a task carries a
+  "Not started yet" badge.
 - **Add to calendar.** A task with a **verified** date that is today or later gets an **Add to calendar** link.
   It opens Google Calendar in a new tab with an all-day event already filled in; you still press Save there. See
   [Privacy](#privacy-and-its-limits) for what the link sends.
@@ -262,10 +266,13 @@ For a manual build, run `BASE_PATH=/Instinct-dashboard/ npm run build` and publi
   opens its notes.
 - **Reminders:** tap **Add to calendar** under a verified date to put it in Google Calendar, which then reminds
   you the way your calendar is set up to. The dashboard itself sends no notifications.
-- **Home-screen icon:** on an iPhone, open the site in Safari, tap **Share**, then **Add to Home Screen**. On
-  Android, open it in Chrome, tap the **⋮** menu, then **Add to Home screen**. The icon opens the dashboard in
-  your normal browser, so Google sign-in works as usual. It is a shortcut only: nothing is installed and nothing
-  is kept for offline use.
+- **Home-screen icon:** on Android, open the site in Chrome, tap the **⋮** menu, then **Add to Home screen**. On
+  an iPhone or iPad, open it in Safari, tap **Share**, then **Add to Home Screen**, and switch **Open as Web App**
+  off before you tap **Add**. Since iOS 26, Safari otherwise opens a home-screen site in a window of its own,
+  whatever the site asks for, and Google's sign-in window is least reliable there. With the switch off, the icon
+  opens the dashboard in Safari as usual. Either way it is a shortcut only: nothing is kept on the device, so
+  each visit starts with **Connect Google account**. This was not tried on a real phone; if signing in fails
+  from the icon, open the site in the browser instead.
 - **Ongoing work:** start a task's Notes with `Ongoing:` (for example "Ongoing: daily reminder at 09:00") and it
   gets an "Ongoing" label and its own group. The dashboard never makes up a date for it.
 - **Refresh:** press **Refresh** after changing the sheet, or wait up to 5 minutes.
@@ -303,7 +310,7 @@ them can be left out or left blank. The header must be spelled as shown; letter 
 | `Date verified` | `verified`, `planning` or `unknown`. Blank means `unknown`. | Shown as a badge next to the recorded date. In Financial priority only a `verified` date ranks ahead of the other dates in its tier, and only a `verified` date can move an opportunity task above the top tier. Only a `verified` date gets **Add to calendar**. Anything else is treated as not verified, shown on the task and listed as a problem. |
 | `Area` | Free text: the part of life the task belongs to, for example `Home`, `Health`, `Money`, `Work`. Use the same few words every time. | Shown as a tag on the task and offered in the **Area** picker. `Home`, `home` and ` HOME ` count as one area; `Home` and `House` do not. A blank cell is listed under **No area** and flagged in Review. |
 | `Start` | `YYYY-MM-DD`, or blank when the task can be worked on now | The first day the task can be acted on. Until that day the task is left out of every view unless **Not started yet** is ticked. It never changes the order. Anything that isn't a date is listed as a problem and the task counts as started. |
-| `Next step` | Free text: the one next thing to do, for example `Ring the surgery for a slot` | The first line under the task's name. A blank cell reads "Not recorded" and is flagged in Review. Never read for dates or amounts. |
+| `Next step` | Free text: the one next thing to do, for example `Ring the surgery for a slot` | Shown straight under the task's name (at the top of the last column in the wide table). A blank cell reads "Not recorded" and is flagged in Review. Never read for dates or amounts. |
 
 For the fixed values, letter case and extra spaces don't matter (`Inbound`, `AVOIDABLE CHARGE`), but the words do:
 `inbound email` or `yes` are not accepted. In the free-text columns, web addresses starting with `https://` become
@@ -325,10 +332,11 @@ quickest way to spot a mistyped header.
 ## How Today and Review choose tasks
 
 Both views use structured cells only: `Status`, the date in `Deadline`, `Date verified`, `Last update`, `Start`,
-and whether `Next step` and `Area` are blank. They never read a date, an amount or an instruction out of Notes,
-Next step or any other text.
+`Delay-cost basis` (for the order of Your move), and whether `Next step` and `Area` are blank. They never read a
+date, an amount or an instruction out of Notes, Next step or any other text.
 
-**Today** takes the tasks that are not done and have started, and puts each one in the first group it fits:
+**Today** takes the tasks that are not done. Tasks that have not started are left out too, unless **Not started
+yet** is ticked. Each task goes in the first group it fits:
 
 1. **Your move:** the status is `waiting on you`. The group is in [Financial priority](#how-financial-priority-works)
    order, and an opened card says why it sits where it does.
@@ -338,17 +346,26 @@ Next step or any other text.
 3. **Chase:** the remaining tasks whose status is `waiting on someone else`, the longest without an update first.
    A task with no readable Last update leads, because nobody knows how long it has waited.
 
-Every other task that is not done (status `open` with no date in the next 7 days, for example) is counted in the
-line under the groups, with a button to **All tasks**. Today is a short list of what needs a look now, not a
-judgement of what matters most: like Financial priority, it cannot weigh one task against another.
+What is left is never described as more than the sheet says:
+
+- **Can't be placed** lists the remaining tasks whose Status cell is blank or not one of the four statuses, or
+  whose Deadline cell holds something that isn't a `YYYY-MM-DD` date. The dashboard can't tell whose move they
+  are or whether their date is close, so it shows them instead of guessing.
+- The other remaining tasks are open, with no recorded date in the next 7 days. They are counted in a line under
+  the groups, next to the number of done tasks left out, with a button to **All tasks**.
+
+Today is a short list of what needs a look now, not a judgement of what matters most: like Financial priority, it
+cannot weigh one task against another.
 
 **Review** takes the same tasks and lists the ones with at least one of these flags:
 
 | Flag | When |
 | --- | --- |
+| No valid status | `Status` is blank or not one of the four statuses |
+| Date not readable | `Deadline` holds something that isn't a `YYYY-MM-DD` date |
 | No update for N days | `Last update` is 30 or more calendar days back, counted in your timezone |
 | No last update recorded | `Last update` is blank or not a readable timestamp. No age is guessed. |
-| Waiting on someone else, no date | The status is `waiting on someone else` and there is no recorded date to look again |
+| Waiting on someone else, no date | The status is `waiting on someone else` and the Deadline cell is blank: there is no date to look again |
 | No next step | The sheet has a `Next step` column and this task's cell is blank |
 | No area | The sheet has an `Area` column and this task's cell is blank |
 
@@ -356,7 +373,7 @@ Tasks with the most flags come first, then the longest without an update, then s
 threshold. The last two checks are skipped, and the view says so, while the sheet doesn't have the column.
 
 While the sheet has none of the optional columns, Today still works from Status and the recorded dates, and
-Review checks only the first three flags.
+Review runs every check except the last two.
 
 ## How Financial priority works
 
@@ -496,12 +513,14 @@ What it can't protect against:
 | Amber "Tasks may be out of date" | Press **Refresh** (or **Reconnect** if the sign-in expired). |
 | A new column's information doesn't appear | Check its header in row 1 against the table in [Updating tasks](#updating-tasks). The bottom of the dashboard lists the optional columns it found. |
 | **You requested** and **Inbound** are empty | The sheet has no `Origin` column, or its cells hold something other than `you requested` or `inbound`. |
-| A task is missing from **Today** | Today lists only tasks waiting on you, tasks with a recorded date from today to 7 days ahead, and tasks waiting on someone else. The line under the groups counts the rest; **All tasks** shows them. Done tasks and tasks that haven't started are left out. |
+| A task is missing from **Today** | Today lists tasks waiting on you, tasks with a recorded date from today to 7 days ahead, and tasks waiting on someone else. The lines under the groups count the rest and the done tasks; **All tasks** shows them. Tasks that haven't started are behind **Not started yet**. |
+| A task is under **Can't be placed** | Its Status isn't one of `open`, `waiting on you`, `waiting on someone else`, `done`, or its Deadline isn't written as `YYYY-MM-DD`. Fix the cell in the sheet; the exact problem is listed at the bottom of the dashboard. |
 | A task is missing from every view | Its `Start` date is still ahead: tick **Not started yet**. Or an **Area** is chosen: press **Reset filters**. |
 | There is no **Area** picker, or no Next step line | The sheet has no `Area` or `Next step` column yet, or its header is spelled differently. The bottom of the dashboard lists the optional columns it found. |
 | The same area shows twice in the picker | It is spelled two ways in the sheet (for example `Home` and `House`). Use one spelling. |
 | There is no **Add to calendar** link | The link is only offered for a date that is today or later, on a task that isn't done, with `verified` in its `Date verified` cell. On Today and Review it is behind **Show details**. |
 | The home-screen icon asks me to connect every time | That is how it works: nothing is kept on the device, so each visit starts with **Connect Google account**. |
+| Signing in does nothing when the site is opened from the home-screen icon | The icon opened the site in a window of its own. On an iPhone or iPad, remove the icon and add it again with **Open as Web App** switched off, or open the site in the browser. |
 | A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell: a verified date then comes before every date that is not verified in its own group. Only an `opportunity` task is ever moved above another group, and only while its verified date is from today to 7 days ahead; a task with no `Delay-cost basis` is never moved. See [How Financial priority works](#how-financial-priority-works). |
 
 ## Other ways to connect (not used)
@@ -534,16 +553,17 @@ The dashboard uses private browser sign-in on purpose. For completeness:
 - `src/lib/filters.ts`: status filters, search, the area and start filters, the origin views and the date groups.
   `src/lib/preview.ts` folds long free text.
 - `src/lib/today.ts`, `src/lib/review.ts`: which tasks the Today and Review views show, and in what order. Both
-  take structured cells only.
+  take structured cells only, and both keep apart the tasks whose Status or Deadline cell can't be read.
 - `src/lib/calendar.ts`: the "Add to calendar" link (a Google Calendar event template address; no API call).
 - `src/lib/dates.ts`: date-only deadlines stay calendar dates; timestamps are shown in the viewer's timezone
   with a label.
 - `src/lib/googleAuth.ts`, `src/hooks/useDashboard.ts`: Google Identity Services token model (token requested
   only from a click, kept in memory, cleared on sign-out), expiry, auto refresh and pausing.
 - `security-headers.ts`, `netlify.toml`: Content-Security-Policy and other headers. A test keeps them in sync.
-- `public/manifest.webmanifest`, `public/icons/`: the home-screen icon. The manifest says `"display": "browser"`
-  on purpose: an installed, stand-alone window is where Google's sign-in pop-up is least reliable. There is no
-  service worker.
+- `public/manifest.webmanifest`, `public/icons/`: the home-screen icon. The manifest asks for
+  `"display": "browser"` on purpose: a stand-alone window is where Google's sign-in pop-up is least reliable.
+  That is a request, not a guarantee: since iOS 26, Safari opens every home-screen site as a web app unless the
+  person switches that off when adding it. There is no service worker.
 - Lint rules forbid `console`, browser storage, service workers and `dangerouslySetInnerHTML` in app code.
 - Test data is invented (`src/test/fixtures.ts`, `e2e/helpers.ts`). Never copy real tracker rows, amounts, names
   or links into tests, fixtures, screenshots, issues or pull requests: this repository is public.

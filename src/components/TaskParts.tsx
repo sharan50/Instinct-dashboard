@@ -74,6 +74,26 @@ function VerificationBadge({ task }: { task: Task }) {
 }
 
 /**
+ * "Add to calendar": offered for a verified date that is today or later (see
+ * lib/calendar.ts). A plain link; nothing is sent unless it is followed.
+ */
+export function CalendarLink({ task, today }: { task: Task; today: CalendarDate }) {
+  if (!offersCalendarLink(task, today)) return null;
+  return (
+    <a
+      className="calendar-link"
+      href={calendarUrl(task) ?? undefined}
+      target="_blank"
+      rel="noopener noreferrer"
+      // Starts with the words on screen, so voice control can find the link by them.
+      aria-label={`Add to calendar: ${taskName(task)} (opens Google Calendar in a new tab)`}
+    >
+      Add to calendar
+    </a>
+  );
+}
+
+/**
  * The date from the sheet's Deadline column. It is a recorded date that may be
  * a planning or check date, so it is worded as a date ("in 3 days"), never as
  * something due or enforced, and always carries its "Date verified" badge.
@@ -82,8 +102,7 @@ function VerificationBadge({ task }: { task: Task }) {
  * does not know whether a consequence applies now. It is set wherever the
  * "why this order" line, which says the same, is not shown.
  *
- * `calendarLink` adds "Add to calendar" under a verified date that is today
- * or later (see lib/calendar.ts).
+ * `calendarLink` adds "Add to calendar" under the date (see CalendarLink).
  */
 export function RecordedDate({
   task,
@@ -148,18 +167,7 @@ export function RecordedDate({
       {passedNote && state.kind === 'overdue' && task.dateVerification === 'verified' ? (
         <span className="detail-note muted">{PASSED_NOTE}</span>
       ) : null}
-      {calendarLink && offersCalendarLink(task, today) ? (
-        <a
-          className="calendar-link"
-          href={calendarUrl(task) ?? undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          // Starts with the words on screen, so voice control can find the link by them.
-          aria-label={`Add to calendar: ${taskName(task)} (opens Google Calendar in a new tab)`}
-        >
-          Add to calendar
-        </a>
-      ) : null}
+      {calendarLink ? <CalendarLink task={task} today={today} /> : null}
     </span>
   );
 }

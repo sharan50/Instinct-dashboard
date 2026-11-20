@@ -14,6 +14,7 @@ import {
   isListView,
   isNotStarted,
   sortByDeadline,
+  statusKey,
   viewOrigin,
   type SortOrder,
   type StatusKey,
@@ -80,12 +81,17 @@ export function TaskDashboard({
   const listView = isListView(view);
 
   const areas = useMemo(() => countByArea(data.tasks), [data.tasks]);
-  // An area that is no longer in the sheet (renamed since the last refresh) stops filtering.
-  const activeArea = area !== null && areas.some((entry) => entry.key === area) ? area : null;
+  // An area only filters while the sheet still has it: not after its Area column or its last row has gone.
+  const activeArea = data.columns.area && area !== null && areas.some((entry) => entry.key === area) ? area : null;
   const notStarted = useMemo(
     () => data.tasks.filter((task) => isNotStarted(task, today)).length,
     [data.tasks, today],
   );
+  // A filter whose control has gone from the screen is switched off for good. Left on, it would
+  // keep "Reset filters" on screen with nothing to reset, and come back by itself if the area or
+  // a not-started task reappeared after a later refresh.
+  if (area !== null && activeArea === null) setArea(null);
+  if (showNotStarted && notStarted === 0) setShowNotStarted(false);
   // What every view starts from: the chosen area, without the tasks that have not started
   // yet unless they are asked for.
   const scope = useMemo(
@@ -119,23 +125,18 @@ export function TaskDashboard({
     [active, today, data.columns, format.timeZone],
   );
   const onScreen = view === 'today' ? active.length - sections.elsewhere : view === 'review' ? reviewItems.length : shown.length;
-  // Matches the view leaves out: behind an unticked status chip, or not started yet.
-  const hiddenByStatus = useMemo(
-    () => (listView ? filterTasks(scope, { statuses: ALL_STATUSES, query, origin }).length - shown.length : 0),
-    [listView, scope, query, origin, shown.length],
-  );
-  const hiddenNotStarted = useMemo(
-    () =>
-      showNotStarted
-        ? 0
-        : filterTasks(data.tasks, {
-            statuses: listView ? statuses : DEFAULT_STATUS_FILTER,
-            query,
-            origin,
-            area: activeArea,
-          }).filter((task) => isNotStarted(task, today)).length,
-    [showNotStarted, data.tasks, listView, statuses, query, origin, activeArea, today],
-  );
+  // Tasks that match the search, the area and the view's origin but are not on screen, by the one
+  // thing that would bring each back: a status that is not shown (in Today and Review, Done), or,
+  // for a task whose status is shown, "Not started yet".
+  const hidden = useMemo(() => {
+    const shownStatuses = listView ? statuses : DEFAULT_STATUS_FILTER;
+    const candidates = filterTasks(data.tasks, { statuses: ALL_STATUSES, query, origin, area: activeArea });
+    const byStatus = candidates.filter((task) => !shownStatuses.has(statusKey(task)));
+    const waitingToStart = showNotStarted
+      ? []
+      : candidates.filter((task) => shownStatuses.has(statusKey(task)) && isNotStarted(task, today));
+    return { byStatus: byStatus.length, notStarted: waitingToStart.length };
+  }, [listView, statuses, data.tasks, query, origin, activeArea, showNotStarted, today]);
   // Recorded dates that have passed. The sheet's "Date verified" column says which of them were checked;
   // nothing says whether a consequence applies now, so this is a count, never an alarm.
   const past = scope.filter((task) => deadlineState(task, today).kind === 'overdue');
@@ -167,6 +168,11 @@ export function TaskDashboard({
     setArea(null);
     setShowNotStarted(false);
   };
+  // Today's count of tasks left out promises that the full list shows them: it does with the default chips.
+  const seeAllTasks = () => {
+    setStatuses(DEFAULT_STATUS_FILTER);
+    setView('list');
+  };
 
   const reconnect = () => connect();
   const chooseAccount = () => connect({ chooseAccount: true });
@@ -183,12 +189,15 @@ export function TaskDashboard({
     onToggleCard: toggleCard,
   };
   // Why nothing is on screen, when matching tasks exist but the view leaves them out.
+  const them = (count: number) => (count === 1 ? 'it' : 'them');
   const noMatchReasons = [
-    hiddenByStatus > 0
-      ? `${plural(hiddenByStatus, 'task matches', 'tasks match')} with a status that is hidden right now (for example Done).`
-      : '',
-    hiddenNotStarted > 0
-      ? `${plural(hiddenNotStarted, 'matching task has', 'matching tasks have')} not started yet: tick “Not started yet” to see ${hiddenNotStarted === 1 ? 'it' : 'them'}.`
+    hidden.byStatus === 0
+      ? ''
+      : listView
+        ? `${plural(hidden.byStatus, 'task matches', 'tasks match')} with a status that is hidden right now (for example Done).`
+        : `${plural(hidden.byStatus, 'matching task is', 'matching tasks are')} done, and this view lists only tasks that are not done. All tasks shows ${them(hidden.byStatus)} when Done is ticked.`,
+    hidden.notStarted > 0
+      ? `${plural(hidden.notStarted, 'matching task has', 'matching tasks have')} not started yet: tick “Not started yet” to see ${them(hidden.notStarted)}.`
       : '',
   ].filter(Boolean);
   const noMatch = (
@@ -322,7 +331,13 @@ export function TaskDashboard({
           active.length === 0 && narrowed ? (
             noMatch
           ) : view === 'today' ? (
-            <TodayView sections={sections} filtered={narrowed} onSeeAll={() => setView('list')} {...viewProps} />
+            <TodayView
+              sections={sections}
+              done={hidden.byStatus}
+              filtered={narrowed}
+              onSeeAll={seeAllTasks}
+              {...viewProps}
+            />
           ) : (
             <ReviewView items={reviewItems} {...viewProps} />
           )
