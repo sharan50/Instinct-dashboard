@@ -23,7 +23,8 @@ phone first (it works from 360 px wide), and on a wide screen it shows a table.
 ## What it shows
 
 - **Counts by status**, as chips you can tick or untick: Open, Waiting on you, Waiting on someone else and Done.
-  Active tasks show by default; tick **Done** to include finished ones.
+  Active tasks show by default; tick **Done** to include finished ones. In the You requested and Inbound views
+  the counts are for that view's tasks.
 - **Search** across Task ID, task name, notes, links and the progress lines.
 - **Four views.** **All tasks** lists every task. **By date** groups tasks by their recorded date: Recorded date
   passed, Next 7 days, Later, Ongoing (no fixed date) and No recorded date. **You requested** and **Inbound** show
@@ -266,9 +267,9 @@ them can be left out or left blank. The header must be spelled as shown; letter 
 | `Money at stake` | Free text | Shown as written. Never read for amounts or dates, and never changes the order. |
 | `Progress` | Free text | Shown as written. |
 | `Hands-on effort` | Free text: the work you have to do yourself, without waiting time | Shown as written. |
-| `Delay-cost basis` | `avoidable charge`, `deadline`, `opportunity`, `sunk or reference` or `unknown`. Blank means `unknown`. | Shown as a badge next to Money at stake, and decides the tier in Financial priority. Anything else is ranked as unknown and listed as a problem. |
+| `Delay-cost basis` | `avoidable charge`, `deadline`, `opportunity`, `sunk or reference` or `unknown`. Blank means `unknown`. | Shown as a badge next to Money at stake (on a line of its own if the sheet has no Money at stake column), and decides the tier in Financial priority. Anything else is ranked as unknown, shown on the task and listed as a problem. |
 | `Expected finish incl. waits` | Free text: when the task should be finished, waiting included | Shown as written, with a note that it includes waiting on others. When the status is `waiting on someone else`, the note says so. A blank cell reads "Not recorded"; no date is guessed. |
-| `Date verified` | `verified`, `planning` or `unknown`. Blank means `unknown`. | Shown as a badge next to the recorded date. Only `verified` lets the date move a task up in Financial priority. Anything else is treated as not verified and listed as a problem. |
+| `Date verified` | `verified`, `planning` or `unknown`. Blank means `unknown`. | Shown as a badge next to the recorded date. In Financial priority only a `verified` date ranks ahead of the other dates in its tier, and only a `verified` date can move an opportunity task above the top tier. Anything else is treated as not verified, shown on the task and listed as a problem. |
 
 For the fixed values, letter case and extra spaces don't matter (`Inbound`, `AVOIDABLE CHARGE`), but the words do:
 `inbound email` or `yes` are not accepted. In the free-text columns, web addresses starting with `https://` become
@@ -284,11 +285,15 @@ Financial priority is the default order of the list. It uses only structured cel
    `sunk or reference`.
 2. **Then the date, inside each of those groups.** Verified dates first, earliest first (so dates that have passed
    lead). Then planning or unknown dates, earliest first. Then tasks with no date, in sheet order. A planning or
-   unknown date never outranks a verified one, however early it is.
-3. **One fixed rule.** An `opportunity` task whose **verified** date is today or within the next 7 days goes above
-   `avoidable charge` and `deadline` tasks that have no verified date. So a basis without a checked date never
-   buries a checked date that is close. Once that date has passed, the task drops back to its place among the
-   opportunity tasks: a date in the past never moves a task across tiers, so nothing stays urgent forever.
+   unknown date never outranks a verified one, however early it is. All it does is put its task ahead of the
+   tasks with no date at all in the same group.
+3. **One fixed rule, for `opportunity` tasks only.** An `opportunity` task whose **verified** date is today or
+   within the next 7 days goes above `avoidable charge` and `deadline` tasks that have no verified date. So a
+   top-tier label with no checked date does not bury an opportunity whose checked date is close. The moved task
+   is then also above the opportunity tasks that were not moved. Once its date has passed, it is back among them
+   under rule 2: a date in the past never moves a task across tiers, so nothing stays urgent forever. A task with
+   any other basis is never moved. That includes a blank basis: a task with no basis stays in the unknown group
+   even with a verified date tomorrow.
 4. **Done tasks**, when you tick Done, come last.
 
 Each task says why it sits where it does, for example:
@@ -315,8 +320,8 @@ What it never does:
 - It never treats the basis or a date as proof. They are what the sheet says, and the dashboard can't check that a
   charge is real or that a date is enforced. Neither a date nor a Money at stake entry is shown as a verified loss.
 - It never treats a date that has passed as a missed one. A passed date, verified or not, is shown as a date in
-  the past, in the same amber as other notes and never as an alarm. For a verified one the task says the date has
-  passed and that the dashboard does not know whether a consequence applies now.
+  the past, in the same amber as other notes and never as an alarm. For a verified one the task says, in every
+  view, that the date has passed and that the dashboard does not know whether a consequence applies now.
 
 **Urgency needs the `Date verified` column.** The Deadline column holds recorded dates that may be planning or
 check dates, so a date alone never makes a task urgent here. Until the sheet has a `Date verified` column with
@@ -405,7 +410,7 @@ What it can't protect against:
 | Amber "Tasks may be out of date" | Press **Refresh** (or **Reconnect** if the sign-in expired). |
 | A new column's information doesn't appear | Check its header in row 1 against the table in [Updating tasks](#updating-tasks). The bottom of the dashboard lists the optional columns it found. |
 | **You requested** and **Inbound** are empty | The sheet has no `Origin` column, or its cells hold something other than `you requested` or `inbound`. |
-| A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell: a verified date then leads its own tier. Only an `opportunity` task is ever moved above another tier, and only while its verified date is from today to 7 days ahead. See [How Financial priority works](#how-financial-priority-works). |
+| A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell: a verified date then comes before every date that is not verified in its own group. Only an `opportunity` task is ever moved above another group, and only while its verified date is from today to 7 days ahead; a task with no `Delay-cost basis` is never moved. See [How Financial priority works](#how-financial-priority-works). |
 
 ## Other ways to connect (not used)
 

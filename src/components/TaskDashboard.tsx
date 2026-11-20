@@ -56,7 +56,11 @@ export function TaskDashboard({
 
   const today = useMemo(() => todayIn(new Date(now), format.timeZone), [now, format.timeZone]);
   const origin = viewOrigin(view);
-  const counts = useMemo(() => countByStatus(data.tasks), [data.tasks]);
+  // The chips count the tasks of the view on screen: every task, or one origin's.
+  const counts = useMemo(
+    () => countByStatus(origin ? data.tasks.filter((task) => task.origin === origin) : data.tasks),
+    [data.tasks, origin],
+  );
   // Every task that passes the status chips and the search, whatever its origin.
   const matching = useMemo(() => filterTasks(data.tasks, { statuses, query }), [data.tasks, statuses, query]);
   // Of those, the ones an origin view would leave out are counted, so they are never dropped silently.
@@ -236,9 +240,11 @@ export function TaskDashboard({
                 ? `${hiddenMatches} ${hiddenMatches === 1 ? 'task matches' : 'tasks match'} with a status that is hidden right now (for example Done).`
                 : 'Try a different word, or show more statuses.'}
             </p>
-            <button type="button" className="btn btn-secondary" onClick={resetFilters}>
-              Reset filters
-            </button>
+            {filtered ? (
+              <button type="button" className="btn btn-secondary" onClick={resetFilters}>
+                Reset filters
+              </button>
+            ) : null}
           </div>
         ) : view === 'deadlines' ? (
           <DeadlinesView tasks={shown} {...viewProps} showReason={false} />

@@ -89,6 +89,9 @@ test('uses cards on phones and a table only where it fits', async ({ page }, tes
     await expect(page.getByRole('article')).toHaveCount(7);
   } else {
     await expect(page.getByRole('table', { name: 'Tasks by financial priority' })).toBeVisible();
+    // The row header (read out for every cell of its row) holds the name, not the "why" sentence.
+    await expect(page.locator('.task-table tbody th').first()).not.toContainText('Why this order');
+    await expect(page.locator('.task-table tbody td:last-child').first()).toContainText('Why this order:');
     for (const width of [960, 1280, 1600]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await hasHorizontalScroll(page), `at ${width}px`).toBe(false);
@@ -156,6 +159,7 @@ test('shows notes and names as plain text', async ({ page }) => {
   await expect(page.getByText('<img src=x onerror="window.__xss=2"> stays as text too.')).toBeVisible();
   await expect(page.getByText('<b>12</b> maybe')).toBeVisible();
   await expect(page.getByText('Origin not recognised: somewhere <i>else</i>')).toBeVisible();
+  await expect(page.getByText('Date verified not recognised: maybe')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
   await expect(page.locator('main img, main b, main i')).toHaveCount(0);
 });
@@ -211,6 +215,14 @@ test('orders by financial priority, says why, and switches back to the recorded-
 
   await page.getByText('Financial priority', { exact: true }).click();
   expect((await taskNames(page))[0]).toBe(NAMES.photos);
+
+  // The date-grouped view has no "why" line, so there the date line says a verified date has passed.
+  await page.getByText('By date', { exact: true }).click();
+  await expect(page.getByText('Why this order:')).toHaveCount(0);
+  await expect(
+    page.getByText('The date has passed; the dashboard does not know whether a consequence applies now.'),
+  ).toHaveCount(1);
+  expect(await hasHorizontalScroll(page)).toBe(false);
 });
 
 test('shows one origin per view and keeps counting tasks without one', async ({ page }) => {

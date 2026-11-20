@@ -4,7 +4,7 @@ import { formatCalendarDate, formatRelative, formatTimestamp, relativeDay, type 
 import { deadlineState } from '../lib/filters.ts';
 import { splitLinks } from '../lib/linkify.ts';
 import { clipText } from '../lib/preview.ts';
-import { priorityReason } from '../lib/priority.ts';
+import { PASSED_NOTE, priorityReason } from '../lib/priority.ts';
 import {
   DETAIL_FIELDS,
   hasDetailColumns,
@@ -53,27 +53,65 @@ const VERIFICATION_BADGE: Record<DateVerification, { label: string; className: s
   unknown: { label: 'Not verified', className: 'badge badge--unverified' },
 };
 
+/** The sheet's "Date verified" value. One the dashboard does not recognise is shown, not passed off as blank. */
+function VerificationBadge({ task }: { task: Task }) {
+  if (task.dateVerification === null) {
+    return (
+      <span className="badge badge--warning badge--wrap">
+        Date verified not recognised: {task.rawDateVerification}
+      </span>
+    );
+  }
+  const check = VERIFICATION_BADGE[task.dateVerification];
+  return <span className={check.className}>{check.label}</span>;
+}
+
 /**
  * The date from the sheet's Deadline column. It is a recorded date that may be
  * a planning or check date, so it is worded as a date ("in 3 days"), never as
  * something due or enforced, and always carries its "Date verified" badge.
+ *
+ * `passedNote` adds, under a verified date that has passed, that the dashboard
+ * does not know whether a consequence applies now. It is set wherever the
+ * "why this order" line, which says the same, is not shown.
  */
-export function RecordedDate({ task, today }: { task: Task; today: CalendarDate }) {
+export function RecordedDate({
+  task,
+  today,
+  passedNote = false,
+}: {
+  task: Task;
+  today: CalendarDate;
+  passedNote?: boolean;
+}) {
   const format = useFormat();
   const state = deadlineState(task, today);
 
   if (!task.deadline) {
+    // Without a date there is nothing to verify, but a value that is not one of the three is still shown.
+    const unrecognised =
+      task.dateVerification === null ? (
+        <>
+          {' '}
+          <VerificationBadge task={task} />
+        </>
+      ) : null;
     if (state.kind === 'invalid') {
       return (
         <span>
           “{task.rawDeadline}” <span className="badge badge--warning">Not a YYYY-MM-DD date</span>
+          {unrecognised}
         </span>
       );
     }
-    return <span className="muted">{task.ongoing ? 'Ongoing, no fixed date' : 'No recorded date'}</span>;
+    return (
+      <span>
+        <span className="muted">{task.ongoing ? 'Ongoing, no fixed date' : 'No recorded date'}</span>
+        {unrecognised}
+      </span>
+    );
   }
 
-  const check = VERIFICATION_BADGE[task.dateVerification ?? 'unknown'];
   let when: ReactNode = null;
   switch (state.kind) {
     case 'overdue':
@@ -94,7 +132,10 @@ export function RecordedDate({ task, today }: { task: Task; today: CalendarDate 
   return (
     <span>
       <time dateTime={task.deadline.iso}>{formatCalendarDate(task.deadline, format)}</time> {when}{' '}
-      <span className={check.className}>{check.label}</span>
+      <VerificationBadge task={task} />
+      {passedNote && state.kind === 'overdue' && task.dateVerification === 'verified' ? (
+        <span className="detail-note muted">{PASSED_NOTE}</span>
+      ) : null}
     </span>
   );
 }
@@ -276,8 +317,9 @@ function DetailText({ text, full }: { text: string; full: boolean }) {
 /**
  * Progress, Money at stake (with its basis badge), Hands-on effort and
  * Expected finish as separate labelled lines. A line appears when the sheet
- * has its column; a blank cell reads "Not recorded". Long text is folded
- * behind one "Show full text" toggle per task.
+ * has its column; a blank cell reads "Not recorded". A sheet with a basis
+ * column but no Money at stake column gets a "Delay-cost basis" line instead.
+ * Long text is folded behind one "Show full text" toggle per task.
  */
 export function TaskDetails({
   task,
@@ -306,7 +348,7 @@ export function TaskDetails({
             </dd>
           </div>
         ) : null}
-        {columns.moneyAtStake || columns.basis ? (
+        {columns.moneyAtStake ? (
           <div>
             <dt>Money at stake</dt>
             <dd>
@@ -317,6 +359,13 @@ export function TaskDetails({
                   <BasisBadge task={task} />
                 </>
               ) : null}
+            </dd>
+          </div>
+        ) : columns.basis ? (
+          <div>
+            <dt>Delay-cost basis</dt>
+            <dd>
+              <BasisBadge task={task} />
             </dd>
           </div>
         ) : null}

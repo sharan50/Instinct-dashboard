@@ -269,14 +269,17 @@ describe('verified, planning and unknown dates', () => {
 });
 
 describe('sortByPriority', () => {
-  it('puts done tasks last, whatever their basis or date', () => {
+  it('puts done tasks last, whatever their basis or date, and never moves one up', () => {
     const tasks = parse(
       ['done-charge', '2026-10-01', 'avoidable charge', 'verified', '', 'done'],
       ['open-sunk', '', 'sunk or reference', ''],
-      ['done-opportunity', '2026-10-20', 'opportunity', 'verified', '', 'done'],
+      // Its verified date is tomorrow: an open task like this would be moved up.
+      ['done-opportunity', '2026-10-22', 'opportunity', 'verified', '', 'done'],
+      ['open-opportunity', '2026-10-22', 'opportunity', 'verified'],
     );
-    expect(order(tasks)).toEqual(['open-sunk', 'done-charge', 'done-opportunity']);
-    expect(priorityRank(tasks[2] as Task, today).lifted).toBe(false);
+    expect(order(tasks)).toEqual(['open-opportunity', 'open-sunk', 'done-charge', 'done-opportunity']);
+    expect(tasks.map((task) => priorityRank(task, today).lifted)).toEqual([false, false, false, true]);
+    expect(priorityReason(tasks[2] as Task, today)).toEqual({ text: 'Done, not ranked', note: null });
   });
 
   it('matches the recorded-date order when the sheet has none of the optional columns', () => {

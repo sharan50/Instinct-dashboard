@@ -483,6 +483,45 @@ describe('origin views', () => {
     expect(cardTitles()).toEqual([PLANNING.P08]);
   });
 
+  it('counts statuses for the view on screen', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    const chips = () => screen.getAllByRole('checkbox').map((chip) => chip.getAttribute('aria-label'));
+    expect(chips()).toEqual(['Open, 5 tasks', 'Waiting on you, 1 task', 'Waiting on someone else, 1 task', 'Done, 1 task']);
+
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    expect(chips()).toEqual(['Open, 2 tasks', 'Waiting on you, 1 task', 'Waiting on someone else, 0 tasks', 'Done, 0 tasks']);
+
+    await user.click(screen.getByRole('radio', { name: 'You requested' }));
+    expect(chips()).toEqual(['Open, 1 task', 'Waiting on you, 0 tasks', 'Waiting on someone else, 1 task', 'Done, 1 task']);
+
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(chips()).toEqual(['Open, 5 tasks', 'Waiting on you, 1 task', 'Waiting on someone else, 1 task', 'Done, 1 task']);
+  });
+
+  it('offers Reset filters only when a filter is set', async () => {
+    const values = [
+      [...HEADER, 'Origin'],
+      ['T1', 'Open and requested', 'open', '', '', '', 'you requested'],
+      ['T2', 'Done and inbound', 'done', '', '', '', 'inbound'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    await user.click(screen.getByRole('radio', { name: 'Inbound' }));
+    // The only inbound task is done, and the filters are as they started: nothing to reset.
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText(/1 task matches with a status that is hidden right now/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toEqual(['Done and inbound']);
+    await user.type(screen.getByRole('searchbox'), 'nothing like this');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: 'Reset filters' })[0] as HTMLElement);
+    expect(screen.getByRole('radio', { name: 'Inbound' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Done/ })).not.toBeChecked();
+  });
+
   it('counts the missing origins among the tasks that pass the filters', async () => {
     const { user } = setupPlanning();
     await connect(user);
@@ -585,8 +624,10 @@ describe('priority order', () => {
     await user.click(screen.getByText('How Financial priority works'));
     const help = screen.getByText('How Financial priority works').closest('details') as HTMLElement;
     expect(help).toHaveTextContent('It never reads amounts or dates out of Money at stake, Progress or other text');
-    expect(help).toHaveTextContent('only a date marked verified moves a task up');
-    expect(help).toHaveTextContent('neither a date nor a Money at stake entry proves a loss');
+    expect(help).toHaveTextContent(
+      'One that is not verified only puts its task ahead of tasks with no date in the same basis group: it never outranks a verified date and never moves a task to another group.',
+    );
+    expect(help).toHaveTextContent('Neither a date nor a Money at stake entry proves a loss.');
     // What the order cannot tell you: the 7-day move is a fixed rule, not a comparison of what is at stake.
     expect(help).toHaveTextContent(
       'This is a fixed rule, not a judgement of how much is at stake. The dashboard cannot compare amounts, currencies or the real cost of an opportunity, so the order reflects only the basis label, the recorded date and whether that date is verified. The 7-day window is an arbitrary fixed threshold.',
@@ -595,6 +636,7 @@ describe('priority order', () => {
       'an opportunity task whose verified date is today or within the next 7 days goes above avoidable-charge and deadline tasks that have no verified date',
     );
     expect(help).toHaveTextContent('A verified date that has passed does not move a task up');
+    expect(help).toHaveTextContent('Tasks with any other basis, a blank one included, are never moved, whatever their date.');
     expect(help).toHaveTextContent('When a verified date has passed, the dashboard does not know whether a consequence applies now.');
     expect(help).toHaveTextContent('The Tasks tab has no “Delay-cost basis” column yet, so every task counts as basis unknown.');
     expect(help).toHaveTextContent('The Tasks tab has no “Date verified” column yet, so no date counts as verified.');
@@ -681,6 +723,60 @@ describe('priority order', () => {
   });
 });
 
+describe('a verified date that has passed', () => {
+  const PASSED = 'The date has passed; the dashboard does not know whether a consequence applies now.';
+  const MOVED = 'Moved up by the fixed 7-day rule: its verified date is within 7 days.';
+  const values = [
+    [...HEADER, 'Delay-cost basis', 'Date verified'],
+    ['T1', 'Verified and passed', 'open', '2026-10-18', '', '', 'opportunity', 'verified'],
+    ['T2', 'Planning and passed', 'open', '2026-10-19', '', '', 'opportunity', 'planning'],
+    ['T3', 'Verified and ahead', 'open', '2026-10-30', '', '', 'opportunity', 'verified'],
+  ];
+
+  it('says so once on the task in every view, including those without the "why this order" line', async () => {
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    const passedOn = (title: string) => within(card(title)).queryAllByText(PASSED, { exact: false }).length;
+
+    // Financial priority: the why line says it, so the date line does not repeat it.
+    expect(why(card('Verified and passed'))).toBe(`Opportunity, recorded date 3 days ago (verified). ${PASSED}`);
+    expect(line(card('Verified and passed'), 'Recorded date')).toHaveTextContent(/^Recorded dateSun, 18 Oct 2026 3 days ago Verified$/);
+    expect(['Verified and passed', 'Planning and passed', 'Verified and ahead'].map(passedOn)).toEqual([1, 0, 0]);
+
+    // Recorded date order has no why line: the date line carries the sentence.
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+    expect(line(card('Verified and passed'), 'Recorded date')).toHaveTextContent(
+      `Recorded dateSun, 18 Oct 2026 3 days ago Verified${PASSED}`,
+    );
+    expect(['Verified and passed', 'Planning and passed', 'Verified and ahead'].map(passedOn)).toEqual([1, 0, 0]);
+
+    // So does the By date view, where "See by date" leads.
+    await user.click(screen.getByRole('button', { name: 'See by date' }));
+    const group = screen.getByRole('region', { name: /^Recorded date passed/ });
+    expect(within(group).getByRole('article', { name: 'Verified and passed' })).toHaveTextContent(PASSED);
+    expect(['Verified and passed', 'Planning and passed', 'Verified and ahead'].map(passedOn)).toEqual([1, 0, 0]);
+  });
+
+  it('follows the calendar: after midnight a date that was today has passed, and its move has ended', async () => {
+    const today = [
+      [...HEADER, 'Delay-cost basis', 'Date verified'],
+      ['T1', 'Charge with no date', 'open', '', '', '', 'avoidable charge', ''],
+      ['T2', 'Opportunity dated today', 'open', '2026-10-21', '', '', 'opportunity', 'verified'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(today)) });
+    await connect(user);
+    expect(cardTitles()).toEqual(['Opportunity dated today', 'Charge with no date']);
+    expect(why(card('Opportunity dated today'))).toBe(`Opportunity, recorded date today (verified). ${MOVED}`);
+
+    // It is 09:30 in India. Fifteen hours on, with the page left open, it is 00:30 the next day.
+    await settle(15 * 3_600_000);
+    expect(cardTitles()).toEqual(['Charge with no date', 'Opportunity dated today']);
+    expect(why(card('Opportunity dated today'))).toBe(`Opportunity, recorded date yesterday (verified). ${PASSED}`);
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+  });
+});
+
 describe('progress on each task', () => {
   it('shows Progress, Money at stake, Hands-on effort and Expected finish as separate labelled lines', async () => {
     const { user } = setupPlanning();
@@ -739,9 +835,10 @@ describe('progress on each task', () => {
     await user.clear(screen.getByRole('searchbox'));
     await user.type(screen.getByRole('searchbox'), 'pencil');
     expect(cardTitles()).toEqual([PLANNING.P03]);
-    expect(
-      screen.getByRole('button', { name: `Show full text for ${PLANNING.P03} (matches your search)` }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: `Show full text for ${PLANNING.P03} (matches your search)` }));
+    // Once the text is open the match is on screen, so the hint goes.
+    expect(screen.getByRole('button', { name: `Show less text for ${PLANNING.P03}` })).toBeInTheDocument();
+    expect(screen.queryByText('matches your search')).not.toBeInTheDocument();
   });
 
   it('shows the text as written: no HTML, no reading of amounts, only https links', async () => {
@@ -781,6 +878,78 @@ describe('progress on each task', () => {
     expect(screen.getByText(`Optional columns found in the Tasks tab: ${FULL_HEADER.slice(HEADER.length).join(', ')}.`)).toBeInTheDocument();
   });
 
+  it('adds a line only for a column the sheet has, even when it has just one of them', async () => {
+    const one = async (header: string, value: string) => {
+      const view = setup({ fetchImpl: scriptedFetch(valuesResponse([[...HEADER, header], ['T1', 'One column', 'open', '', '', '', value]])) });
+      await connect(view.user);
+      return view;
+    };
+    const labels = ['Progress', 'Money at stake', 'Delay-cost basis', 'Hands-on effort', 'Expected finish'];
+    const shown = () => labels.filter((label) => within(card('One column')).queryByText(label, { selector: 'dt' }) !== null);
+
+    // A basis without a Money at stake column gets its own line: no "Money at stake" line for a column that is not there.
+    let view = await one('Delay-cost basis', 'opportunity');
+    expect(shown()).toEqual(['Delay-cost basis']);
+    expect(line(card('One column'), 'Delay-cost basis')).toHaveTextContent(/^Delay-cost basisBasis: opportunity$/);
+    expect(screen.getByText(/^Optional columns found in the Tasks tab: Delay-cost basis\. Not found, so not shown: Links, Origin, Money at stake,/)).toBeInTheDocument();
+    view.unmount();
+
+    view = await one('Money at stake', 'A refundable fee');
+    expect(shown()).toEqual(['Money at stake']);
+    expect(line(card('One column'), 'Money at stake')).toHaveTextContent(/^Money at stakeA refundable fee$/);
+    expect(screen.queryByText(/^Basis/, { selector: '.badge' })).not.toBeInTheDocument();
+    view.unmount();
+
+    view = await one('Hands-on effort', '10 minutes');
+    expect(shown()).toEqual(['Hands-on effort']);
+    view.unmount();
+
+    view = await one('Expected finish incl. waits', 'Friday');
+    expect(shown()).toEqual(['Expected finish']);
+    view.unmount();
+
+    view = await one('Progress', 'Started.');
+    expect(shown()).toEqual(['Progress']);
+  });
+
+  it('says the finish includes waiting on someone else only when that is the task’s status', async () => {
+    const values = [
+      [...HEADER, 'Expected finish incl. waits'],
+      ['T1', 'Waiting on me', 'waiting on you', '', '', '', 'Friday'],
+      ['T2', 'Waiting on them', 'waiting on someone else', '', '', '', 'Next month'],
+      ['T3', 'Finished', 'done', '', '', '', 'Last week'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    const general = 'Includes any waiting on others, not just hands-on time.';
+    expect(line(card('Waiting on me'), 'Expected finish')).toHaveTextContent(`Expected finishFriday${general}`);
+    expect(line(card('Finished'), 'Expected finish')).toHaveTextContent(`Expected finishLast week${general}`);
+    expect(line(card('Waiting on them'), 'Expected finish')).toHaveTextContent(/^Expected finishNext month Includes waiting on someone else$/);
+    expect(screen.getAllByText('Includes waiting on someone else')).toHaveLength(1);
+  });
+
+  it('shows a Date verified value it does not recognise on the task, not as a blank one', async () => {
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Checkbox column', 'open', '2026-10-24', '', '', 'TRUE'],
+      ['T2', 'Odd value, no date', 'open', '', '', '', 'maybe'],
+      ['T3', 'Blank cell', 'open', '2026-10-24'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(line(card('Checkbox column'), 'Recorded date')).toHaveTextContent(
+      /^Recorded dateSat, 24 Oct 2026 In 3 days Date verified not recognised: TRUE$/,
+    );
+    expect(line(card('Odd value, no date'), 'Recorded date')).toHaveTextContent(
+      /^Recorded dateNo recorded date Date verified not recognised: maybe$/,
+    );
+    expect(line(card('Blank cell'), 'Recorded date')).toHaveTextContent(/^Recorded dateSat, 24 Oct 2026 In 3 days Not verified$/);
+    // Either way the date is ranked as not verified.
+    expect(why(card('Checkbox column'))).toBe('Basis unknown, recorded date in 3 days (not verified)');
+    expect(screen.getByText('2 problems found in the sheet')).toBeInTheDocument();
+  });
+
   it('puts the lines in one table column on a wide screen', async () => {
     setWideScreen(true);
     const { user } = setupPlanning();
@@ -805,7 +974,11 @@ describe('progress on each task', () => {
       PLANNING.P06,
     ]);
     const ladder = rows[2] as HTMLElement;
-    expect(ladder).toHaveTextContent('Why this order: Avoidable charge, recorded date in 3 days (not verified)');
+    // The row header is read out for every cell of the row, so it holds only the name and badges.
+    expect(within(ladder).getByRole('rowheader')).toHaveTextContent(/^Return the rented ladder You requested$/);
+    expect(ladder.querySelector('td:last-child')).toHaveTextContent(
+      /^Why this order: Avoidable charge, recorded date in 3 days \(not verified\)Progress/,
+    );
     expect(line(ladder, 'Progress')).toHaveTextContent('Return slot booked.');
     expect(within(ladder).getByText('Basis: avoidable charge')).toBeInTheDocument();
     expect(within(ladder).getByText('Not verified')).toBeInTheDocument();

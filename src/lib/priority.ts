@@ -12,20 +12,25 @@ import type { DateVerification, DelayCostBasis, Task } from './tasks.ts';
  *
  * The basis and the date are what the sheet says, not proof: the dashboard
  * cannot check that a charge is real or that a date is enforced. The Deadline
- * column holds recorded dates, which may be planning or check dates. So only a
- * date the sheet marks as verified can move a task up; every other date just
- * orders tasks that are otherwise equal.
+ * column holds recorded dates, which may be planning or check dates. So a
+ * date that is not verified does very little: it puts its task ahead of tasks
+ * with no date at all in the same tier, and orders it among the other dates
+ * that are not verified. It never outranks a verified date and never moves a
+ * task to another tier.
  *
  * 1. Tier by basis: avoidable charge and deadline, then opportunity, then
  *    unknown or blank, then sunk or reference.
  * 2. Inside a tier: verified dates (earliest first, so past dates lead), then
  *    planning or unknown dates (earliest first), then tasks without a date.
- * 3. One fixed rule, so the basis alone never buries a checked date that is
- *    close: an opportunity task whose verified date is today or within the
- *    next PROMOTION_WINDOW_DAYS goes above top-tier tasks that have no
- *    verified date. Once that date has passed the task drops back to its
- *    place in its own tier: a date in the past never moves a task across
- *    tiers, so it cannot stay urgent forever.
+ * 3. One fixed rule, for opportunity tasks only, so a top-tier label with no
+ *    checked date does not bury an opportunity whose checked date is close:
+ *    an opportunity task whose verified date is today or within the next
+ *    PROMOTION_WINDOW_DAYS goes above top-tier tasks that have no verified
+ *    date (and so above the opportunity tasks that were not moved). Once
+ *    that date has passed the task is back in its own tier under rule 2: a
+ *    date in the past never moves a task across tiers, so it cannot stay
+ *    urgent forever. Tasks with any other basis, a blank one included, are
+ *    never moved, whatever their date.
  * 4. Ties keep sheet order. Done tasks, when shown, come last.
  *
  * This is not magnitude-aware. The dashboard cannot compare amounts,

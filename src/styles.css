@@ -1216,8 +1216,7 @@ code {
 }
 
 .task-table .why-order {
-  margin-top: 0.3rem;
-  font-weight: 400;
+  margin-bottom: 0.4rem;
 }
 
 /* In the table the labelled lines sit above the notes, each label over its text. */

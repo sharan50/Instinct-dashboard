@@ -228,4 +228,14 @@ describe('search in the free-text lines', () => {
     const both = task({ notes: 'Bring a pencil.', progress: LONG_PROGRESS });
     expect(matchesOnlyInFoldedText(both, 'pencil')).toBe(true);
   });
+
+  it('does not flag the folded text when the word is also in the Task ID or in a link, which are always on screen', () => {
+    expect(matchesOnlyInFoldedText(task({ progress: LONG_PROGRESS }), 'pencil')).toBe(true);
+    expect(matchesOnlyInFoldedText(task({ id: 'PENCIL-1', progress: LONG_PROGRESS }), 'pencil')).toBe(false);
+    expect(
+      matchesOnlyInFoldedText(task({ rawLinks: 'Pencil list: https://example.org/list', progress: LONG_PROGRESS }), 'pencil'),
+    ).toBe(false);
+    // The start of a folded text is on screen too.
+    expect(matchesOnlyInFoldedText(task({ progress: LONG_PROGRESS }), 'downloaded')).toBe(false);
+  });
 });

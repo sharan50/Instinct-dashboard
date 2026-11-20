@@ -60,7 +60,7 @@ export function TaskCard({
         <div>
           <dt>Recorded date</dt>
           <dd>
-            <RecordedDate task={task} today={today} />
+            <RecordedDate task={task} today={today} passedNote={!showReason} />
           </dd>
         </div>
         <div>
@@ -116,6 +116,8 @@ export function TaskTable({
   caption,
 }: TaskViewProps & { caption: string }) {
   // The labelled lines share the last column with the notes, so the table keeps six columns.
+  // The "why this order" line sits there too, not in the row header: a screen reader repeats
+  // the row header for every cell of the row, so it holds only the name, badges and links.
   const details = hasDetailColumns(columns);
   return (
     <table className={details ? 'task-table task-table--details' : 'task-table'}>
@@ -144,21 +146,31 @@ export function TaskTable({
             <td className="task-id">{task.id || `Row ${task.rowNumber}`}</td>
             <th scope="row" className="task-title-cell">
               <span>{task.title || '(No task name)'}</span>
-              {task.ongoing ? <span className="badge badge--ongoing">Ongoing</span> : null}
-              {columns.origin ? <OriginBadge task={task} /> : null}
-              {showReason ? <WhyThisOrder task={task} today={today} /> : null}
+              {task.ongoing ? (
+                <>
+                  {' '}
+                  <span className="badge badge--ongoing">Ongoing</span>
+                </>
+              ) : null}
+              {columns.origin ? (
+                <>
+                  {' '}
+                  <OriginBadge task={task} />
+                </>
+              ) : null}
               <TaskLinks task={task} />
             </th>
             <td>
               <StatusBadge task={task} />
             </td>
             <td>
-              <RecordedDate task={task} today={today} />
+              <RecordedDate task={task} today={today} passedNote={!showReason} />
             </td>
             <td>
               <LastUpdate task={task} now={now} />
             </td>
             <td>
+              {showReason ? <WhyThisOrder task={task} today={today} /> : null}
               <TaskDetails
                 task={task}
                 columns={columns}

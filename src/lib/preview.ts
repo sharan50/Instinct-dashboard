@@ -4,8 +4,10 @@
  * start of the text, cut between words, and the rest sits behind a toggle.
  */
 
-/** Text up to this length, on at most PREVIEW_LINES lines, is shown in full. */
+/** Text up to this length, on at most LONG_TEXT_LINES lines, is shown in full. */
 export const LONG_TEXT_CHARS = 160;
+/** A few short lines are cheaper to show than a toggle: only more lines than this are folded. */
+export const LONG_TEXT_LINES = 5;
 /** The most a folded text shows before the "…". */
 export const PREVIEW_CHARS = 110;
 export const PREVIEW_LINES = 3;
@@ -19,7 +21,7 @@ export interface ClippedText {
 
 export function clipText(text: string): ClippedText {
   const lines = text.split('\n');
-  if (text.length <= LONG_TEXT_CHARS && lines.length <= PREVIEW_LINES) return { text, clipped: false };
+  if (text.length <= LONG_TEXT_CHARS && lines.length <= LONG_TEXT_LINES) return { text, clipped: false };
 
   let preview = lines.slice(0, PREVIEW_LINES).join('\n');
   if (preview.length > PREVIEW_CHARS) {

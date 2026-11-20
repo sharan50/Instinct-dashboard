@@ -149,9 +149,11 @@ export function OrderExplainer({ columns }: { columns: SheetColumns }) {
           then tasks with no date, in sheet order.
         </li>
         <li>
-          One fixed rule: an opportunity task whose verified date is today or within the next {PROMOTION_WINDOW_DAYS}{' '}
-          days goes above avoidable-charge and deadline tasks that have no verified date. A verified date that has
-          passed does not move a task up: the task keeps its place among the opportunity tasks.
+          One fixed rule, for opportunity tasks only: an opportunity task whose verified date is today or within the
+          next {PROMOTION_WINDOW_DAYS} days goes above avoidable-charge and deadline tasks that have no verified date,
+          and so above the opportunity tasks that were not moved. A verified date that has passed does not move a task
+          up: the task stays with the other opportunity tasks, ahead of those without a verified date. Tasks with any
+          other basis, a blank one included, are never moved, whatever their date.
         </li>
         <li>Done tasks, when shown, come last.</li>
       </ol>
@@ -163,9 +165,10 @@ export function OrderExplainer({ columns }: { columns: SheetColumns }) {
       </p>
       <p>
         The basis and the dates are what the sheet says; the dashboard can’t check them. A recorded date may be a
-        planning or check date, so only a date marked verified moves a task up, and neither a date nor a Money at
-        stake entry proves a loss. When a verified date has passed, the dashboard does not know whether a consequence
-        applies now.
+        planning or check date. One that is not verified only puts its task ahead of tasks with no date in the same
+        basis group: it never outranks a verified date and never moves a task to another group. Neither a date nor a
+        Money at stake entry proves a loss. When a verified date has passed, the dashboard does not know whether a
+        consequence applies now.
       </p>
       {columns.basis ? null : (
         <p>
