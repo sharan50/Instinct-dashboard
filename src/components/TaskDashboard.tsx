@@ -5,17 +5,22 @@ import { useMediaQuery } from '../hooks/useMediaQuery.ts';
 import { useNow } from '../hooks/useNow.ts';
 import { todayIn } from '../lib/dates.ts';
 import {
+  countByOrigin,
   countByStatus,
   deadlineState,
   DEFAULT_STATUS_FILTER,
   filterTasks,
   sortByDeadline,
+  viewOrigin,
+  type SortOrder,
   type StatusKey,
+  type View,
 } from '../lib/filters.ts';
-import { STATUSES } from '../lib/tasks.ts';
+import { sortByPriority } from '../lib/priority.ts';
+import { ORIGIN_LABELS, STATUSES } from '../lib/tasks.ts';
 import { authProblemText, fetchProblemText } from '../messages.ts';
 import { DataIssues, Footer, Header, ProblemPanel, SyncBar } from './Chrome.tsx';
-import { SearchBox, StatusFilter, ViewSwitch, type View } from './Filters.tsx';
+import { OrderExplainer, OriginNote, SearchBox, SortControl, StatusFilter, ViewSwitch } from './Filters.tsx';
 import { ProblemActions } from './Screens.tsx';
 import { DeadlinesView, TaskList } from './TaskViews.tsx';
 
@@ -45,17 +50,36 @@ export function TaskDashboard({
   const [statuses, setStatuses] = useState<ReadonlySet<StatusKey>>(DEFAULT_STATUS_FILTER);
   const [query, setQuery] = useState('');
   const [view, setView] = useState<View>('list');
+  const [order, setOrder] = useState<SortOrder>('priority');
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [fullText, setFullText] = useState<ReadonlySet<string>>(() => new Set());
 
-  const today = todayIn(new Date(now), format.timeZone);
-  const counts = useMemo(() => countByStatus(data.tasks), [data.tasks]);
-  const shown = useMemo(() => sortByDeadline(filterTasks(data.tasks, { statuses, query })), [data.tasks, statuses, query]);
-  const hiddenMatches = useMemo(
-    () => filterTasks(data.tasks, { statuses: ALL_STATUSES, query }).length - shown.length,
-    [data.tasks, query, shown.length],
+  const today = useMemo(() => todayIn(new Date(now), format.timeZone), [now, format.timeZone]);
+  const origin = viewOrigin(view);
+  // The chips count the tasks of the view on screen: every task, or one origin's.
+  const counts = useMemo(
+    () => countByStatus(origin ? data.tasks.filter((task) => task.origin === origin) : data.tasks),
+    [data.tasks, origin],
   );
-  const overdue = data.tasks.filter((task) => deadlineState(task, today).kind === 'overdue').length;
+  // Every task that passes the status chips and the search, whatever its origin.
+  const matching = useMemo(() => filterTasks(data.tasks, { statuses, query }), [data.tasks, statuses, query]);
+  // Of those, the ones an origin view would leave out are counted, so they are never dropped silently.
+  const originCounts = useMemo(() => countByOrigin(matching), [matching]);
+  const shown = useMemo(() => {
+    const inView = origin ? matching.filter((task) => task.origin === origin) : matching;
+    return order === 'priority' ? sortByPriority(inView, today) : sortByDeadline(inView);
+  }, [matching, origin, order, today]);
+  const hiddenMatches = useMemo(
+    () => filterTasks(data.tasks, { statuses: ALL_STATUSES, query, origin }).length - shown.length,
+    [data.tasks, query, origin, shown.length],
+  );
+  // Recorded dates that have passed. The sheet's "Date verified" column says which of them were checked;
+  // nothing says whether a consequence applies now, so this is a count, never an alarm.
+  const past = data.tasks.filter((task) => deadlineState(task, today).kind === 'overdue');
+  const pastVerified = past.filter((task) => task.dateVerification === 'verified').length;
   const filtered = query.trim() !== '' || !sameSet(statuses, DEFAULT_STATUS_FILTER);
+  const originUnused = origin !== null && data.tasks.every((task) => task.origin !== origin);
+  const listTitle = order === 'priority' ? 'Tasks by financial priority' : 'Tasks, earliest recorded date first';
 
   const toggleStatus = (key: StatusKey) =>
     setStatuses((current) => {
@@ -64,13 +88,14 @@ export function TaskDashboard({
       else next.add(key);
       return next;
     });
-  const toggleNotes = (key: string) =>
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const toggleIn = (current: ReadonlySet<string>, key: string): ReadonlySet<string> => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
+  const toggleNotes = (key: string) => setExpanded((current) => toggleIn(current, key));
+  const toggleFullText = (key: string) => setFullText((current) => toggleIn(current, key));
   const resetFilters = () => {
     setStatuses(DEFAULT_STATUS_FILTER);
     setQuery('');
@@ -78,7 +103,16 @@ export function TaskDashboard({
 
   const reconnect = () => connect();
   const chooseAccount = () => connect({ chooseAccount: true });
-  const viewProps = { today, now, query, expanded, onToggleNotes: toggleNotes };
+  const viewProps = {
+    columns: data.columns,
+    today,
+    now,
+    query,
+    expanded,
+    onToggleNotes: toggleNotes,
+    fullText,
+    onToggleFullText: toggleFullText,
+  };
   const problem = state.fetchError ? fetchProblemText(state.fetchError, accountHint) : null;
   const authProblem = state.authProblem ? authProblemText(state.authProblem.problem) : null;
 
@@ -144,21 +178,29 @@ export function TaskDashboard({
             <SearchBox value={query} onChange={setQuery} />
             <ViewSwitch view={view} onChange={setView} />
           </div>
+          <OriginNote missing={originCounts.missing} hasColumn={data.columns.origin} inOriginView={origin !== null} />
+          {view === 'deadlines' ? null : (
+            <div className="controls__order">
+              <SortControl order={order} onChange={setOrder} />
+              <OrderExplainer columns={data.columns} />
+            </div>
+          )}
         </section>
 
-        {overdue > 0 ? (
-          <p className="overdue-note">
+        {past.length > 0 ? (
+          <p className="date-note">
             <strong>
-              {overdue} overdue {overdue === 1 ? 'task' : 'tasks'}
-            </strong>
-            {view === 'list' ? (
+              {past.length} {past.length === 1 ? 'task has' : 'tasks have'} a recorded date in the past
+            </strong>{' '}
+            <span>({pastVerified > 0 ? `${pastVerified} verified` : 'none verified'})</span>
+            {view === 'deadlines' ? null : (
               <>
                 {' '}
                 <button type="button" className="btn-link" onClick={() => setView('deadlines')}>
-                  See deadlines
+                  See by date
                 </button>
               </>
-            ) : null}
+            )}
           </p>
         ) : null}
 
@@ -178,6 +220,18 @@ export function TaskDashboard({
             <h2>No tasks yet</h2>
             <p>The Tasks tab has a header row but no tasks. Add rows in the sheet, then refresh.</p>
           </div>
+        ) : origin && originUnused ? (
+          <div className="empty">
+            <h2>No tasks marked “{ORIGIN_LABELS[origin]}”</h2>
+            <p>
+              {data.columns.origin
+                ? `No row in the Tasks tab has “${origin}” in its Origin column.`
+                : 'The Tasks tab has no Origin column yet. Add one with “you requested” or “inbound” on each row.'}
+            </p>
+            <button type="button" className="btn btn-secondary" onClick={() => setView('list')}>
+              Show all tasks
+            </button>
+          </div>
         ) : shown.length === 0 ? (
           <div className="empty">
             <h2>No tasks match</h2>
@@ -186,24 +240,26 @@ export function TaskDashboard({
                 ? `${hiddenMatches} ${hiddenMatches === 1 ? 'task matches' : 'tasks match'} with a status that is hidden right now (for example Done).`
                 : 'Try a different word, or show more statuses.'}
             </p>
-            <button type="button" className="btn btn-secondary" onClick={resetFilters}>
-              Reset filters
-            </button>
+            {filtered ? (
+              <button type="button" className="btn btn-secondary" onClick={resetFilters}>
+                Reset filters
+              </button>
+            ) : null}
           </div>
-        ) : view === 'list' ? (
+        ) : view === 'deadlines' ? (
+          <DeadlinesView tasks={shown} {...viewProps} showReason={false} />
+        ) : (
           <section aria-labelledby="list-heading">
             <h2 id="list-heading" className="visually-hidden">
-              Tasks, earliest deadline first
+              {listTitle}
             </h2>
-            <TaskList tasks={shown} wide={wide} {...viewProps} />
+            <TaskList tasks={shown} wide={wide} caption={listTitle} {...viewProps} showReason={order === 'priority'} />
           </section>
-        ) : (
-          <DeadlinesView tasks={shown} {...viewProps} />
         )}
 
         <DataIssues issues={data.issues} />
       </main>
-      <Footer now={now} onRevoke={state.token ? revokeAccess : undefined} />
+      <Footer now={now} onRevoke={state.token ? revokeAccess : undefined} columns={data.columns} />
     </>
   );
 }

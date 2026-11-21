@@ -14,7 +14,8 @@ phone first (it works from 360 px wide), and on a wide screen it shows a table.
 **Contents:** [What it shows](#what-it-shows) · [Setup](#setup) · [1. Google Cloud](#1-google-cloud-setup-one-time) ·
 [2. Your computer](#2-run-it-on-your-computer) · [3. Netlify](#3-deploy-to-netlify-recommended) ·
 [4. GitHub Pages](#4-deploy-to-github-pages-alternative) · [Everyday use](#everyday-use) ·
-[Updating tasks](#updating-tasks) · [Privacy](#privacy-and-its-limits) ·
+[Updating tasks](#updating-tasks) · [Financial priority](#how-financial-priority-works) ·
+[Privacy](#privacy-and-its-limits) ·
 [Reconnect, sign out, revoke](#reconnect-sign-out-and-revoke-access) · [Stopping a deployment](#stopping-a-deployment) ·
 [If a secret is exposed](#if-a-key-or-secret-is-exposed) · [Troubleshooting](#troubleshooting) ·
 [Other options](#other-ways-to-connect-not-used) · [For developers](#for-developers)
@@ -22,10 +23,24 @@ phone first (it works from 360 px wide), and on a wide screen it shows a table.
 ## What it shows
 
 - **Counts by status**, as chips you can tick or untick: Open, Waiting on you, Waiting on someone else and Done.
-  Active tasks show by default; tick **Done** to include finished ones.
-- **Search** across Task ID, task name and notes.
-- Two views. **All tasks** is sorted by deadline, earliest first, with blank deadlines last. **Deadlines** groups
-  tasks into Overdue, Next 7 days, Later, Ongoing (no fixed date) and No deadline.
+  Active tasks show by default; tick **Done** to include finished ones. In the You requested and Inbound views
+  the counts are for that view's tasks.
+- **Search** across Task ID, task name, notes, links and the progress lines.
+- **Four views.** **All tasks** lists every task. **By date** groups tasks by their recorded date: Recorded date
+  passed, Next 7 days, Later, Ongoing (no fixed date) and No recorded date. **You requested** and **Inbound** show
+  the tasks with that value in the sheet's Origin column. A task with a blank or unrecognised Origin stays in All
+  tasks and By date, and an **Origin missing** count says how many there are, so no row is dropped silently.
+  The status chips and the search work the same in every view.
+- **Sort by.** **Financial priority** (the default) orders the list by the sheet's Delay-cost basis and then by
+  date, and every task carries a short "Why this order" line. **Recorded date** switches back to the earlier
+  order: earliest date first, tasks without a date last. See
+  [How Financial priority works](#how-financial-priority-works).
+- **Recorded date.** The date in the sheet's Deadline column is shown as a *recorded date*, with a **Verified**,
+  **Planning date** or **Not verified** badge from the Date verified column. It may be a planning or check date, so
+  the dashboard words it as a date ("in 3 days", "3 days ago") and never calls it due, overdue or enforced.
+- **Progress on each task:** Progress, Money at stake (with its Delay-cost basis), Hands-on effort and Expected
+  finish, each on its own labelled line and shown exactly as written in the sheet. A line appears once the sheet
+  has its column; a blank cell reads "Not recorded". Long text is folded behind **Show full text**.
 - **Links** from the sheet's Links column (documents and other work delivered for a task) show on each
   task as buttons that open in a new tab. Search covers them too.
 - **Notes** are folded away so the phone view stays short; tap **Show notes**. Notes are shown as plain text.
@@ -35,9 +50,10 @@ phone first (it works from 360 px wide), and on a wide screen it shows a table.
   - Amber **Tasks may be out of date**: the last fetch is over 10 minutes old, or the Google sign-in expired.
   - Red **Refresh failed**: the last refresh didn't work, so the tasks shown are from the last successful fetch.
 - Each task also shows its own **Last update** time from the sheet, in your timezone with a timezone label
-  (for example `21 Oct 2026, 02:50 GMT+5:30`). Deadlines are calendar dates and show the same day everywhere.
-- **Problems in the sheet**, such as an unknown status, a deadline not written as `YYYY-MM-DD` or a repeated
-  Task ID, are listed at the bottom. Those rows are still shown, never hidden.
+  (for example `21 Oct 2026, 02:50 GMT+5:30`). Recorded dates are calendar dates and show the same day everywhere.
+- **Problems in the sheet**, such as an unknown status, a deadline not written as `YYYY-MM-DD`, a repeated
+  Task ID, or an Origin, Delay-cost basis or Date verified value that isn't one of the allowed ones, are listed
+  at the bottom. Those rows are still shown, never hidden.
 - An **Open sheet** button opens the tracker in Google Sheets.
 
 The dashboard refreshes when you connect, when you press **Refresh**, and on its own at most every 5 minutes
@@ -213,7 +229,12 @@ For a manual build, run `BASE_PATH=/Instinct-dashboard/ npm run build` and publi
 - **Connect:** click **Connect Google account**, choose your account in Google's window and allow access. If
   nothing appears, allow pop-ups for the site.
 - **Filter:** tick or untick the status chips; **Reset filters** brings back the default (active tasks).
-- **Deadlines view:** choose **Deadlines** at the top of the list.
+- **Views:** choose **All tasks**, **By date**, **You requested** or **Inbound** at the top of the list.
+- **Order:** **Sort by** switches between **Financial priority** and **Recorded date**. The choice lasts until you
+  reload the page, because nothing is saved on the device. **How Financial priority works**, under the control,
+  spells out the rules and says which of its columns the sheet doesn't have yet.
+- **Long text:** **Show full text** opens a task's long Progress or Money at stake text; **Show notes** opens its
+  notes.
 - **Ongoing work:** start a task's Notes with `Ongoing:` (for example "Ongoing: daily reminder at 09:00") and it
   gets an "Ongoing" label and its own group. The dashboard never makes up a date for it.
 - **Refresh:** press **Refresh** after changing the sheet, or wait up to 5 minutes.
@@ -224,16 +245,94 @@ The sheet is the source of truth. The dashboard only reads it. To change a task,
 Google Sheets (or let Instinct update it). The change shows in the dashboard after the next refresh. Keep to
 these rules so every row reads correctly:
 
-- Row 1 holds exactly these headers, in any order: `Task ID`, `Task`, `Status`, `Deadline`, `Last update`, `Notes`.
-  An optional `Links` column holds links to work delivered for the task.
+- Row 1 holds these headers, in any order: `Task ID`, `Task`, `Status`, `Deadline`, `Last update`, `Notes`.
+  These six are required.
 - **Task ID** is unique per row, for example `T034`. Never reuse an ID.
 - **Status** is one of: `open`, `waiting on you`, `waiting on someone else`, `done`.
-- **Deadline** is `YYYY-MM-DD` (for example `2026-10-29`) or blank. Blank means "no confirmed deadline", not overdue.
+- **Deadline** is `YYYY-MM-DD` (for example `2026-10-29`) or blank. The dashboard treats it as a *recorded date*:
+  it may be a planning or check date, so on its own it is never shown as due or overdue. It only counts as a
+  checked date when `Date verified` says `verified` (see below). Blank means "no date recorded".
 - **Last update** is an ISO 8601 timestamp with a timezone offset, for example `2026-10-21T09:00:00+05:30`.
-- **Links** (optional): one or more `Label: https://…` entries separated by `;`, for example
-  `Comparison: https://… ; Earlier draft (superseded): https://…`. Each one shows as a button on the task.
-- Don't rename the **Tasks** tab. Rows below row 1000 are not read (the dashboard warns if row 1000 is used).
+- Don't rename the **Tasks** tab. The dashboard reads columns A to Z and rows 1 to 1000 of it; rows below row 1000
+  are not read (the dashboard warns if row 1000 is used).
 - Don't put passwords, ID documents, card details or bank account numbers in the sheet.
+
+**Optional columns.** Each one is found by its header name, so it can sit in any column from A to Z, and any of
+them can be left out or left blank. The header must be spelled as shown; letter case and extra spaces don't matter.
+
+| Header | What to write | What the dashboard does with it |
+| --- | --- | --- |
+| `Links` | One or more `Label: https://…` entries separated by `;`, for example `Comparison: https://… ; Earlier draft (superseded): https://…` | Each one shows as a button on the task. |
+| `Origin` | `you requested` or `inbound` | Puts the task in the **You requested** or **Inbound** view. A blank cell or any other value keeps the task in All tasks and By date and counts it under **Origin missing**; any other value is also listed as a problem. |
+| `Money at stake` | Free text | Shown as written. Never read for amounts or dates, and never changes the order. |
+| `Progress` | Free text | Shown as written. |
+| `Hands-on effort` | Free text: the work you have to do yourself, without waiting time | Shown as written. |
+| `Delay-cost basis` | `avoidable charge`, `deadline`, `opportunity`, `sunk or reference` or `unknown`. Blank means `unknown`. | Shown as a badge next to Money at stake (on a line of its own if the sheet has no Money at stake column), and decides the tier in Financial priority. Anything else is ranked as unknown, shown on the task and listed as a problem. |
+| `Expected finish incl. waits` | Free text: when the task should be finished, waiting included | Shown as written, with a note that it includes waiting on others. When the status is `waiting on someone else`, the note says so. A blank cell reads "Not recorded"; no date is guessed. |
+| `Date verified` | `verified`, `planning` or `unknown`. Blank means `unknown`. | Shown as a badge next to the recorded date. In Financial priority only a `verified` date ranks ahead of the other dates in its tier, and only a `verified` date can move an opportunity task above the top tier. Anything else is treated as not verified, shown on the task and listed as a problem. |
+
+For the fixed values, letter case and extra spaces don't matter (`Inbound`, `AVOIDABLE CHARGE`), but the words do:
+`inbound email` or `yes` are not accepted. In the free-text columns, web addresses starting with `https://` become
+links, as in Notes. The bottom of the dashboard lists which optional columns it found in the sheet, which is the
+quickest way to spot a mistyped header.
+
+## How Financial priority works
+
+Financial priority is the default order of the list. It uses only structured cells: `Delay-cost basis`, the date in
+`Deadline`, `Date verified`, `Status` (done or not) and the row's position in the sheet.
+
+1. **Basis first.** `avoidable charge` and `deadline` come first, then `opportunity`, then `unknown` or blank, then
+   `sunk or reference`.
+2. **Then the date, inside each of those groups.** Verified dates first, earliest first (so dates that have passed
+   lead). Then planning or unknown dates, earliest first. Then tasks with no date, in sheet order. A planning or
+   unknown date never outranks a verified one, however early it is. All it does is put its task ahead of the
+   tasks with no date at all in the same group.
+3. **One fixed rule, for `opportunity` tasks only.** An `opportunity` task whose **verified** date is today or
+   within the next 7 days goes above `avoidable charge` and `deadline` tasks that have no verified date. So a
+   top-tier label with no checked date does not bury an opportunity whose checked date is close. The moved task
+   is then also above the opportunity tasks that were not moved. Once its date has passed, it is back among them
+   under rule 2: a date in the past never moves a task across tiers, so nothing stays urgent forever. A task with
+   any other basis is never moved. That includes a blank basis: a task with no basis stays in the unknown group
+   even with a verified date tomorrow.
+4. **Done tasks**, when you tick Done, come last.
+
+Each task says why it sits where it does, for example:
+
+- "Avoidable charge, recorded date in 3 days (not verified)"
+- "Avoidable charge, no date recorded"
+- "Opportunity, recorded date in 2 days (verified). Moved up by the fixed 7-day rule: its verified date is within
+  7 days."
+- "Opportunity, recorded date 3 days ago (verified). The date has passed; the dashboard does not know whether a
+  consequence applies now."
+
+**This is a fixed rule, not a ranking by size.** The dashboard cannot compare amounts, currencies or the real cost
+of an opportunity. The order reflects only three things: the basis label, the recorded date, and whether that date
+is verified. The 7-day window is an arbitrary fixed threshold: day 7 moves a task up and day 8 does not, whatever is
+at stake. A small opportunity with a verified date next week goes above a large avoidable charge that has no
+verified date, because the dashboard has no way to weigh them. Read the order as a sorted list of the sheet's own
+labels, and use your own judgement for what matters most.
+
+What it never does:
+
+- It never reads an amount or a date out of Money at stake, Progress or any other text, and a filled-in Money at
+  stake cell does not move a task up.
+- It never guesses a date. A task without one says "no date recorded".
+- It never treats the basis or a date as proof. They are what the sheet says, and the dashboard can't check that a
+  charge is real or that a date is enforced. Neither a date nor a Money at stake entry is shown as a verified loss.
+- It never treats a date that has passed as a missed one. A passed date, verified or not, is shown as a date in
+  the past, in the same amber as other notes and never as an alarm. For a verified one the task says, in every
+  view, that the date has passed and that the dashboard does not know whether a consequence applies now.
+
+**Urgency needs the `Date verified` column.** The Deadline column holds recorded dates that may be planning or
+check dates, so a date alone never makes a task urgent here. Until the sheet has a `Date verified` column with
+`verified` on the dates that were checked against their source, no date counts as verified: tasks are still
+ordered by basis and then by recorded date, but nothing is moved up, and the count of past dates at the top of the
+page says "none verified". Filling that column in is a job for the sheet (you or Instinct), not the dashboard.
+Even then, the only urgency the dashboard shows is the fixed rule above, for a verified date from today to 7 days
+ahead.
+
+While the sheet has none of these columns, Financial priority gives the same order as Recorded date for the
+tasks that aren't done.
 
 ## Privacy and its limits
 
@@ -309,6 +408,9 @@ What it can't protect against:
 | "The Google sign-in window was blocked" | Allow pop-ups for the site in your browser settings. |
 | "The Tasks tab's header row doesn't match" | Fix row 1 of the Tasks tab (see [Updating tasks](#updating-tasks)), then press **Try again**. |
 | Amber "Tasks may be out of date" | Press **Refresh** (or **Reconnect** if the sign-in expired). |
+| A new column's information doesn't appear | Check its header in row 1 against the table in [Updating tasks](#updating-tasks). The bottom of the dashboard lists the optional columns it found. |
+| **You requested** and **Inbound** are empty | The sheet has no `Origin` column, or its cells hold something other than `you requested` or `inbound`. |
+| A date you know is real doesn't move its task up | Write `verified` in that row's `Date verified` cell: a verified date then comes before every date that is not verified in its own group. Only an `opportunity` task is ever moved above another group, and only while its verified date is from today to 7 days ahead; a task with no `Delay-cost basis` is never moved. See [How Financial priority works](#how-financial-priority-works). |
 
 ## Other ways to connect (not used)
 
@@ -332,16 +434,21 @@ The dashboard uses private browser sign-in on purpose. For completeness:
 - `src/lib/sheetsApi.ts`: the single read-only request
   (`GET …/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE` with a Bearer token, no cookies, no HTTP
   cache), error mapping, and retries with exponential backoff and jitter.
-- `src/lib/tasks.ts`: maps columns by header name, pads missing trailing cells, skips blank rows, and reports
-  missing or duplicate headers, unknown statuses, bad dates and duplicate IDs.
+- `src/lib/tasks.ts`: maps required and optional columns by header name, pads missing trailing cells, skips blank
+  rows, and reports missing or duplicate headers, unknown statuses, bad dates, duplicate IDs and Origin,
+  Delay-cost basis or Date verified values outside the allowed ones.
+- `src/lib/priority.ts`: Financial priority (the tiers, the verified-date rules, the fixed 7-day window and the
+  "why this order" text). It takes structured cells only and never parses free text.
+- `src/lib/filters.ts`: status filters, search, the origin views and the date groups. `src/lib/preview.ts` folds
+  long free text.
 - `src/lib/dates.ts`: date-only deadlines stay calendar dates; timestamps are shown in the viewer's timezone
   with a label.
 - `src/lib/googleAuth.ts`, `src/hooks/useDashboard.ts`: Google Identity Services token model (token requested
   only from a click, kept in memory, cleared on sign-out), expiry, auto refresh and pausing.
 - `security-headers.ts`, `netlify.toml`: Content-Security-Policy and other headers. A test keeps them in sync.
 - Lint rules forbid `console`, browser storage, service workers and `dangerouslySetInnerHTML` in app code.
-- Test data is invented (`src/test/fixtures.ts`, `e2e/helpers.ts`). Never copy real tracker rows into tests,
-  fixtures or screenshots.
+- Test data is invented (`src/test/fixtures.ts`, `e2e/helpers.ts`). Never copy real tracker rows, amounts, names
+  or links into tests, fixtures, screenshots, issues or pull requests: this repository is public.
 
 References: [spreadsheets.values.get](https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/get),
 [Sheets API scopes](https://developers.google.com/workspace/sheets/api/scopes),

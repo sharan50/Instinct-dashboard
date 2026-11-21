@@ -12,18 +12,27 @@ export function isoDate(days: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
+/** A long entry: it must fold behind "Show full text" and wrap on a phone. */
+const LONG_PROGRESS =
+  'Compared three providers on monthly price, contract length and the fee for leaving early. Two of them answered the ' +
+  'question about the router; the third has not replied yet, so the comparison is not final. Table so far: ' +
+  'https://example.org/broadband/table-with-a-very-long-address-that-must-wrap-on-phones and a note to ask again on Friday.';
+
 export function sampleValues(): string[][] {
   const stamp = new Date(Date.now() - 2 * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
   return [
-    ['Task ID', 'Task', 'Status', 'Deadline', 'Last update', 'Notes', 'Links'],
-    ['T001', 'Renew library card', 'open', isoDate(8), stamp, 'Bring proof of address. Opening hours: https://example.org/library/hours.', 'Checklist: https://example.org/library/checklist'],
-    ['T002', 'Book dentist check-up', 'waiting on you', '', stamp, 'Choose a morning slot from the three offered.'],
-    ['T003', 'Plumber quote for the kitchen tap', 'waiting on someone else', isoDate(-3), stamp, 'Asked for a written quote; no reply yet.'],
-    ['T004', 'Return borrowed camera', 'done', isoDate(-10), stamp, 'Returned in person.'],
+    [
+      'Task ID', 'Task', 'Status', 'Deadline', 'Last update', 'Notes', 'Links',
+      'Origin', 'Money at stake', 'Progress', 'Hands-on effort', 'Delay-cost basis', 'Expected finish incl. waits', 'Date verified',
+    ],
+    ['T001', 'Renew library card', 'open', isoDate(8), stamp, 'Bring proof of address. Opening hours: https://example.org/library/hours.', 'Checklist: https://example.org/library/checklist', 'you requested', 'Small charge after the renewal date', 'Form filled in; proof of address still to print.', '15 minutes', 'avoidable charge', 'Next week', ''],
+    ['T002', 'Book dentist check-up', 'waiting on you', '', stamp, 'Choose a morning slot from the three offered.', '', 'Inbound', '', 'Three slots offered by the practice.', '5 minutes', '', '', ''],
+    ['T003', 'Plumber quote for the kitchen tap', 'waiting on someone else', isoDate(-3), stamp, 'Asked for a written quote; no reply yet.', '', 'you requested', 'Unknown until the quote arrives', 'Chased once by phone.', 'None until the quote is in', 'opportunity', 'About a week after the quote arrives', 'verified'],
+    ['T004', 'Return borrowed camera', 'done', isoDate(-10), stamp, 'Returned in person.', '', 'you requested', '', 'Returned.', '', 'sunk or reference', '', ''],
     ['T005', 'Water the balcony plants', 'open', '', stamp, 'Ongoing: every Sunday morning.'],
-    ['T006', 'Order new passport photos', 'waiting on you', isoDate(2), stamp],
-    ['T007', 'Compare broadband offers before the contract ends', 'open', isoDate(40), stamp, 'Shortlist: three providers. A very-long-unbroken-reference-code-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-should-wrap.', 'Comparison: https://example.org/broadband/comparison-with-a-very-long-address-that-must-wrap-on-phones ; Earlier draft (superseded): https://example.org/broadband/old'],
-    ['T008', 'Check the <b>markup</b> stays text', 'waiting on you', '', stamp, '<img src=x onerror="window.__xss=1"> stays as text.'],
+    ['T006', 'Order new passport photos', 'waiting on you', isoDate(2), stamp, '', '', 'inbound', 'The cheaper booth offer runs until the appointment', '', '30 minutes', 'opportunity', 'In two days', 'verified'],
+    ['T007', 'Compare broadband offers before the contract ends', 'open', isoDate(40), stamp, 'Shortlist: three providers. A very-long-unbroken-reference-code-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-should-wrap.', 'Comparison: https://example.org/broadband/comparison-with-a-very-long-address-that-must-wrap-on-phones ; Earlier draft (superseded): https://example.org/broadband/old', 'you requested', 'Possible saving: reference-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ-should-wrap', LONG_PROGRESS, 'About 2 hours, spread over a few evenings', 'opportunity', 'Around the end of next month, depending on the provider', 'planning'],
+    ['T008', 'Check the <b>markup</b> stays text', 'waiting on you', '', stamp, '<img src=x onerror="window.__xss=1"> stays as text.', '', 'somewhere <i>else</i>', '<b>12</b> maybe', '<img src=x onerror="window.__xss=2"> stays as text too.', '', 'a guess', '', 'maybe'],
   ];
 }
 

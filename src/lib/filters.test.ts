@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { HEADER, sampleValues } from '../test/fixtures.ts';
+import { HEADER, LONG_PROGRESS, makeTask, planningValues, sampleValues } from '../test/fixtures.ts';
 import { parseCalendarDate, type CalendarDate } from './dates.ts';
 import {
+  countByOrigin,
   countByStatus,
   deadlineState,
   DEFAULT_STATUS_FILTER,
   filterTasks,
   groupByDeadline,
+  matchesOnlyInFoldedText,
   matchesOnlyInNotes,
   matchesSearch,
   sortByDeadline,
+  viewOrigin,
   type StatusKey,
 } from './filters.ts';
 import { parseTaskSheet, type Task } from './tasks.ts';
@@ -18,25 +21,7 @@ const today = parseCalendarDate('2026-10-21') as CalendarDate;
 const sample = () => parseTaskSheet(sampleValues()).tasks;
 const ids = (tasks: Task[]) => tasks.map((t) => t.id);
 
-function task(overrides: Partial<Task>): Task {
-  return {
-    key: `id:${overrides.id ?? 'X'}`,
-    rowNumber: 2,
-    id: 'X',
-    title: 'Task',
-    status: 'open',
-    rawStatus: 'open',
-    deadline: null,
-    rawDeadline: '',
-    lastUpdate: null,
-    rawLastUpdate: '',
-    notes: '',
-    links: [],
-    rawLinks: '',
-    ongoing: false,
-    ...overrides,
-  };
-}
+const task = makeTask;
 
 describe('countByStatus', () => {
   it('counts each status, including rows that need a valid status', () => {
@@ -163,5 +148,94 @@ describe('groupByDeadline', () => {
     const groups = groupByDeadline(tasks, today);
     expect(ids(groups.find((g) => g.id === 'soon')?.tasks ?? [])).toEqual(['B', 'A']);
     expect(ids(groups.find((g) => g.id === 'invalid')?.tasks ?? [])).toEqual(['C']);
+  });
+});
+
+describe('origin views', () => {
+  const planning = () => parseTaskSheet(planningValues()).tasks;
+  const ALL = new Set<StatusKey>(['open', 'waiting on you', 'waiting on someone else', 'done', 'unknown']);
+
+  it('maps each view to the origin it shows', () => {
+    expect(viewOrigin('you-requested')).toBe('you requested');
+    expect(viewOrigin('inbound')).toBe('inbound');
+    expect(viewOrigin('list')).toBeNull();
+    expect(viewOrigin('deadlines')).toBeNull();
+  });
+
+  it('shows only the matching origin, whatever its letter case in the sheet', () => {
+    expect(ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: '', origin: 'you requested' }))).toEqual(['P01', 'P03']);
+    // P02 is written "Inbound" in the sheet.
+    expect(ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: '', origin: 'inbound' }))).toEqual(['P02', 'P06', 'P07']);
+  });
+
+  it('keeps rows with a blank or wrong Origin in the unfiltered list, and counts them', () => {
+    const active = filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: '' });
+    expect(ids(active)).toEqual(['P01', 'P02', 'P03', 'P04', 'P05', 'P06', 'P07']);
+    expect(ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: '', origin: null }))).toEqual(ids(active));
+    expect(countByOrigin(active)).toEqual({ 'you requested': 2, inbound: 3, missing: 2 });
+    // Nothing is lost: the two origin views and the missing count add up to the unfiltered list.
+    const counts = countByOrigin(active);
+    expect(counts['you requested'] + counts.inbound + counts.missing).toBe(active.length);
+    expect(ids(active.filter((t) => t.origin === null))).toEqual(['P04', 'P05']);
+  });
+
+  it('counts every row as missing when the sheet has no Origin column', () => {
+    expect(countByOrigin(sample())).toEqual({ 'you requested': 0, inbound: 0, missing: 6 });
+    expect(filterTasks(sample(), { statuses: ALL, query: '', origin: 'inbound' })).toEqual([]);
+  });
+
+  it('combines with the status filters and the search', () => {
+    expect(ids(filterTasks(planning(), { statuses: ALL, query: '', origin: 'you requested' }))).toEqual(['P01', 'P03', 'P08']);
+    expect(ids(filterTasks(planning(), { statuses: new Set<StatusKey>(['waiting on you']), query: '', origin: 'inbound' }))).toEqual(['P02']);
+    expect(ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: 'permit', origin: 'inbound' }))).toEqual(['P07']);
+    expect(ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query: 'permit', origin: 'you requested' }))).toEqual([]);
+  });
+});
+
+describe('search in the free-text lines', () => {
+  const planning = () => parseTaskSheet(planningValues()).tasks;
+  const find = (query: string) => ids(filterTasks(planning(), { statuses: DEFAULT_STATUS_FILTER, query }));
+
+  it('matches Progress, Money at stake, Hands-on effort and Expected finish', () => {
+    expect(find('scanned')).toEqual(['P06']);
+    expect(find('renews')).toEqual(['P02']);
+    expect(find('20 minutes')).toEqual(['P01']);
+    expect(find('saturday')).toEqual(['P01']);
+    expect(find('ladder fee')).toEqual(['P01']);
+  });
+
+  it('does not match the origin, basis or "Date verified" values', () => {
+    expect(find('inbound')).toEqual([]);
+    expect(find('opportunity')).toEqual([]);
+    expect(find('verified')).toEqual([]);
+  });
+
+  it('knows when a match is only in the folded part of a long text', () => {
+    const club = planning()[2] as Task;
+    expect(club.progress).toBe(LONG_PROGRESS);
+    expect(matchesOnlyInFoldedText(club, 'pencil')).toBe(true);
+    expect(matchesOnlyInFoldedText(club, 'club pencil')).toBe(true);
+    // Visible at the start of the text, in the name, or in a link: no hint needed.
+    expect(matchesOnlyInFoldedText(club, 'committee')).toBe(false);
+    expect(matchesOnlyInFoldedText(club, 'membership')).toBe(false);
+    expect(matchesOnlyInFoldedText(club, 'form')).toBe(false);
+    expect(matchesOnlyInFoldedText(club, '')).toBe(false);
+    expect(matchesOnlyInFoldedText(club, 'dentist')).toBe(false);
+    expect(matchesOnlyInFoldedText(planning()[0] as Task, 'booked')).toBe(false);
+  });
+
+  it('still flags the folded text when the word is also in the notes', () => {
+    const both = task({ notes: 'Bring a pencil.', progress: LONG_PROGRESS });
+    expect(matchesOnlyInFoldedText(both, 'pencil')).toBe(true);
+  });
+
+  it('does not flag the folded text when the word is also in the Task ID or in a link, which are always on screen', () => {
+    expect(matchesOnlyInFoldedText(task({ progress: LONG_PROGRESS }), 'pencil')).toBe(true);
+    expect(matchesOnlyInFoldedText(task({ id: 'PENCIL-1', progress: LONG_PROGRESS }), 'pencil')).toBe(false);
+    expect(
+      matchesOnlyInFoldedText(task({ rawLinks: 'Pencil list: https://example.org/list', progress: LONG_PROGRESS }), 'pencil'),
+    ).toBe(false);
+    // The start of a folded text is on screen too.
+    expect(matchesOnlyInFoldedText(task({ progress: LONG_PROGRESS }), 'downloaded')).toBe(false);
   });
 });

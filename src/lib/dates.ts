@@ -87,6 +87,18 @@ export function daysBetween(today: CalendarDate, date: CalendarDate): number {
   return dayNumber(date) - dayNumber(today);
 }
 
+/**
+ * Where a calendar date is relative to today, in plain words: "3 days ago",
+ * "yesterday", "today", "tomorrow", "in 3 days". `days` comes from daysBetween.
+ * Deliberately neutral: it says when the date is, not that anything is due.
+ */
+export function relativeDay(days: number): string {
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days === -1) return 'yesterday';
+  return days > 0 ? `in ${days} days` : `${-days} days ago`;
+}
+
 /** "Thu, 29 Oct 2026" (wording follows the locale). Never shifts the day. */
 export function formatCalendarDate(date: CalendarDate, options: FormatOptions = {}): string {
   return new Intl.DateTimeFormat(options.locale, {

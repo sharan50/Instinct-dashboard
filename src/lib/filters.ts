@@ -1,5 +1,6 @@
 import { compareCalendarDates, daysBetween, type CalendarDate } from './dates.ts';
-import { ACTIVE_STATUSES, STATUSES, type Status, type Task } from './tasks.ts';
+import { clipText } from './preview.ts';
+import { ACTIVE_STATUSES, DETAIL_FIELDS, ORIGINS, STATUSES, type Origin, type Status, type Task } from './tasks.ts';
 
 /** A status filter value: one of the four statuses, or "unknown" for rows whose status needs fixing. */
 export type StatusKey = Status | 'unknown';
@@ -19,11 +20,19 @@ export function countByStatus(tasks: readonly Task[]): Record<StatusKey, number>
   return counts;
 }
 
-/** Every word of the query must appear in the Task ID, task name, notes or links (any case). */
+function searchTerms(query: string): string[] {
+  return query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Every word of the query must appear in the Task ID, task name, notes, links
+ * or one of the free-text lines (any case).
+ */
 export function matchesSearch(task: Task, query: string): boolean {
-  const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const terms = searchTerms(query);
   if (terms.length === 0) return true;
-  const text = `${task.id}\n${task.title}\n${task.notes}\n${task.rawLinks}`.toLocaleLowerCase();
+  const details = DETAIL_FIELDS.map((field) => task[field]).join('\n');
+  const text = `${task.id}\n${task.title}\n${task.notes}\n${task.rawLinks}\n${details}`.toLocaleLowerCase();
   return terms.every((term) => text.includes(term));
 }
 
@@ -33,14 +42,57 @@ export function matchesOnlyInNotes(task: Task, query: string): boolean {
   return matchesSearch({ ...task, notes: '', rawLinks: '' }, query) === false && matchesSearch({ ...task, rawLinks: '' }, query);
 }
 
-export function filterTasks(
-  tasks: readonly Task[],
-  filter: { statuses: ReadonlySet<StatusKey>; query: string },
-): Task[] {
-  return tasks.filter((task) => filter.statuses.has(statusKey(task)) && matchesSearch(task, filter.query));
+/**
+ * True when a search word is in free text folded away behind "Show full text"
+ * and nowhere in the Task ID, name, links or the visible start of those lines.
+ */
+export function matchesOnlyInFoldedText(task: Task, query: string): boolean {
+  if (!matchesSearch(task, query)) return false;
+  const lower = (parts: string[]) => parts.join('\n').toLocaleLowerCase();
+  const shown = lower([task.id, task.title, task.rawLinks, ...DETAIL_FIELDS.map((field) => clipText(task[field]).text)]);
+  const whole = lower(DETAIL_FIELDS.map((field) => task[field]));
+  return searchTerms(query).some((term) => !shown.includes(term) && whole.includes(term));
 }
 
-/** Earliest deadline first; tasks without a usable deadline last; otherwise sheet order. */
+/**
+ * `origin` narrows the list to one origin view ("You requested" or "Inbound").
+ * Tasks with a blank or unrecognised Origin are in neither: they stay in the
+ * unfiltered list and are counted by countByOrigin.
+ */
+export function filterTasks(
+  tasks: readonly Task[],
+  filter: { statuses: ReadonlySet<StatusKey>; query: string; origin?: Origin | null },
+): Task[] {
+  return tasks.filter(
+    (task) =>
+      filter.statuses.has(statusKey(task)) &&
+      (!filter.origin || task.origin === filter.origin) &&
+      matchesSearch(task, filter.query),
+  );
+}
+
+/** The list's views. "list" and "deadlines" show every origin; the other two show one origin each. */
+export type View = 'list' | 'deadlines' | 'you-requested' | 'inbound';
+
+/** The origin a view is limited to, or null for the views that show every task. */
+export function viewOrigin(view: View): Origin | null {
+  if (view === 'you-requested') return 'you requested';
+  return view === 'inbound' ? 'inbound' : null;
+}
+
+/** How the list views are ordered. "date" is the order the dashboard always had. */
+export type SortOrder = 'priority' | 'date';
+
+/** An origin view, or "missing" for rows whose Origin is blank or not one of the two values. */
+export type OriginKey = Origin | 'missing';
+
+export function countByOrigin(tasks: readonly Task[]): Record<OriginKey, number> {
+  const counts = Object.fromEntries([...ORIGINS, 'missing'].map((key) => [key, 0])) as Record<OriginKey, number>;
+  for (const task of tasks) counts[task.origin ?? 'missing'] += 1;
+  return counts;
+}
+
+/** Earliest recorded date first; tasks without a usable date last; otherwise sheet order. */
 export function compareByDeadline(a: Task, b: Task): number {
   if (a.deadline && b.deadline) {
     const byDate = compareCalendarDates(a.deadline, b.deadline);
@@ -67,7 +119,12 @@ export type DeadlineState =
   | { kind: 'none' }
   | { kind: 'invalid' };
 
-/** Where a task's deadline stands relative to today. Done tasks are never overdue. */
+/**
+ * Where a task's recorded date (the Deadline column) stands relative to today.
+ * "overdue" only means the date has passed: the date may be a planning or
+ * check date, so the UI words it as a past date, not as a missed deadline.
+ * Done tasks never count as past.
+ */
 export function deadlineState(task: Task, today: CalendarDate): DeadlineState {
   if (!task.deadline) return task.rawDeadline ? { kind: 'invalid' } : { kind: 'none' };
   if (task.status === 'done') return { kind: 'closed' };
@@ -89,12 +146,12 @@ export interface DeadlineGroup {
 }
 
 const GROUPS: Omit<DeadlineGroup, 'tasks'>[] = [
-  { id: 'overdue', title: 'Overdue', emptyText: 'Nothing overdue.' },
-  { id: 'soon', title: 'Next 7 days', emptyText: 'Nothing due in the next 7 days.' },
+  { id: 'overdue', title: 'Recorded date passed', emptyText: 'No recorded date has passed.' },
+  { id: 'soon', title: 'Next 7 days', emptyText: 'No recorded dates in the next 7 days.' },
   { id: 'later', title: 'Later' },
-  { id: 'invalid', title: 'Deadline needs fixing' },
+  { id: 'invalid', title: 'Date needs fixing' },
   { id: 'ongoing', title: 'Ongoing (no fixed date)' },
-  { id: 'none', title: 'No deadline', emptyText: 'Every task shown has a deadline.' },
+  { id: 'none', title: 'No recorded date', emptyText: 'Every task shown has a recorded date.' },
   { id: 'done', title: 'Done' },
 ];
 
@@ -118,9 +175,9 @@ function groupFor(task: Task, today: CalendarDate): DeadlineGroupId {
 }
 
 /**
- * Splits tasks into Overdue / Next 7 days / Later / No deadline (plus
- * "Ongoing", "Deadline needs fixing" and "Done" when they have tasks).
- * Each group is sorted by deadline, earliest first.
+ * Splits tasks into Recorded date passed / Next 7 days / Later / No recorded
+ * date (plus "Ongoing", "Date needs fixing" and "Done" when they have tasks).
+ * Each group is sorted by recorded date, earliest first.
  */
 export function groupByDeadline(tasks: readonly Task[], today: CalendarDate): DeadlineGroup[] {
   const buckets = new Map<DeadlineGroupId, Task[]>(GROUPS.map((group) => [group.id, []]));

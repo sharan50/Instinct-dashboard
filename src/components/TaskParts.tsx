@@ -1,12 +1,27 @@
-import { Fragment, useId } from 'react';
+import { Fragment, useId, type ReactNode } from 'react';
 import { useFormat } from '../format.ts';
-import { formatCalendarDate, formatRelative, formatTimestamp, type CalendarDate } from '../lib/dates.ts';
+import { formatCalendarDate, formatRelative, formatTimestamp, relativeDay, type CalendarDate } from '../lib/dates.ts';
 import { deadlineState } from '../lib/filters.ts';
 import { splitLinks } from '../lib/linkify.ts';
-import { STATUS_LABELS, type Task } from '../lib/tasks.ts';
+import { clipText } from '../lib/preview.ts';
+import { PASSED_NOTE, priorityReason } from '../lib/priority.ts';
+import {
+  DETAIL_FIELDS,
+  hasDetailColumns,
+  ORIGIN_LABELS,
+  STATUS_LABELS,
+  type DateVerification,
+  type DelayCostBasis,
+  type SheetColumns,
+  type Task,
+} from '../lib/tasks.ts';
 
-function plural(count: number, unit: string): string {
-  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+function taskName(task: Task): string {
+  return task.title || task.id || `row ${task.rowNumber}`;
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export function StatusBadge({ task }: { task: Task }) {
@@ -22,45 +37,107 @@ export function StatusBadge({ task }: { task: Task }) {
   );
 }
 
-export function DeadlineInfo({ task, today }: { task: Task; today: CalendarDate }) {
+/** Who started the task (the sheet's "Origin" column). A blank or wrong value is shown, not hidden. */
+export function OriginBadge({ task }: { task: Task }) {
+  if (task.origin) return <span className="badge badge--origin">{ORIGIN_LABELS[task.origin]}</span>;
+  return (
+    <span className="badge badge--warning badge--wrap">
+      {task.rawOrigin ? `Origin not recognised: ${task.rawOrigin}` : 'Origin missing'}
+    </span>
+  );
+}
+
+const VERIFICATION_BADGE: Record<DateVerification, { label: string; className: string }> = {
+  verified: { label: 'Verified', className: 'badge badge--verified' },
+  planning: { label: 'Planning date', className: 'badge badge--unverified' },
+  unknown: { label: 'Not verified', className: 'badge badge--unverified' },
+};
+
+/** The sheet's "Date verified" value. One the dashboard does not recognise is shown, not passed off as blank. */
+function VerificationBadge({ task }: { task: Task }) {
+  if (task.dateVerification === null) {
+    return (
+      <span className="badge badge--warning badge--wrap">
+        Date verified not recognised: {task.rawDateVerification}
+      </span>
+    );
+  }
+  const check = VERIFICATION_BADGE[task.dateVerification];
+  return <span className={check.className}>{check.label}</span>;
+}
+
+/**
+ * The date from the sheet's Deadline column. It is a recorded date that may be
+ * a planning or check date, so it is worded as a date ("in 3 days"), never as
+ * something due or enforced, and always carries its "Date verified" badge.
+ *
+ * `passedNote` adds, under a verified date that has passed, that the dashboard
+ * does not know whether a consequence applies now. It is set wherever the
+ * "why this order" line, which says the same, is not shown.
+ */
+export function RecordedDate({
+  task,
+  today,
+  passedNote = false,
+}: {
+  task: Task;
+  today: CalendarDate;
+  passedNote?: boolean;
+}) {
   const format = useFormat();
   const state = deadlineState(task, today);
 
   if (!task.deadline) {
+    // Without a date there is nothing to verify, but a value that is not one of the three is still shown.
+    const unrecognised =
+      task.dateVerification === null ? (
+        <>
+          {' '}
+          <VerificationBadge task={task} />
+        </>
+      ) : null;
     if (state.kind === 'invalid') {
       return (
         <span>
           “{task.rawDeadline}” <span className="badge badge--warning">Not a YYYY-MM-DD date</span>
+          {unrecognised}
         </span>
       );
     }
-    return <span className="muted">{task.ongoing ? 'Ongoing, no fixed date' : 'No deadline'}</span>;
+    return (
+      <span>
+        <span className="muted">{task.ongoing ? 'Ongoing, no fixed date' : 'No recorded date'}</span>
+        {unrecognised}
+      </span>
+    );
   }
 
-  const date = <time dateTime={task.deadline.iso}>{formatCalendarDate(task.deadline, format)}</time>;
+  let when: ReactNode = null;
   switch (state.kind) {
     case 'overdue':
-      return (
-        <span>
-          {date} <span className="badge badge--overdue">Overdue by {plural(state.days, 'day')}</span>
-        </span>
-      );
+      // A past date, verified or not, is only a past date: the dashboard does not know whether
+      // a consequence applies now, so it is never shown in the red used for problems.
+      when = <span className="badge badge--warning">{capitalize(relativeDay(-state.days))}</span>;
+      break;
     case 'today':
-      return (
-        <span>
-          {date} <span className="badge badge--today">Due today</span>
-        </span>
-      );
+      when = <span className="badge badge--today">Today</span>;
+      break;
     case 'soon':
-      return (
-        <span>
-          {date}{' '}
-          <span className="badge badge--soon">{state.days === 1 ? 'Due tomorrow' : `Due in ${state.days} days`}</span>
-        </span>
-      );
+      when = <span className="badge badge--soon">{capitalize(relativeDay(state.days))}</span>;
+      break;
     default:
-      return date;
+      break;
   }
+
+  return (
+    <span>
+      <time dateTime={task.deadline.iso}>{formatCalendarDate(task.deadline, format)}</time> {when}{' '}
+      <VerificationBadge task={task} />
+      {passedNote && state.kind === 'overdue' && task.dateVerification === 'verified' ? (
+        <span className="detail-note muted">{PASSED_NOTE}</span>
+      ) : null}
+    </span>
+  );
 }
 
 export function LastUpdate({ task, now }: { task: Task; now: number }) {
@@ -83,10 +160,10 @@ export function LastUpdate({ task, now }: { task: Task; now: number }) {
   return <span className="muted">Not recorded</span>;
 }
 
-/** Notes as plain text: web addresses become links, nothing is read as HTML. */
-export function NotesText({ text }: { text: string }) {
+/** Sheet text as plain text: web addresses become links, nothing is read as HTML. */
+function LinkedText({ text }: { text: string }) {
   return (
-    <p className="notes-text">
+    <>
       {splitLinks(text).map((part, index) =>
         part.type === 'link' ? (
           <a key={index} href={part.href} target="_blank" rel="noopener noreferrer">
@@ -96,7 +173,50 @@ export function NotesText({ text }: { text: string }) {
           <Fragment key={index}>{part.text}</Fragment>
         ),
       )}
+    </>
+  );
+}
+
+/** Notes as plain text: web addresses become links, nothing is read as HTML. */
+export function NotesText({ text }: { text: string }) {
+  return (
+    <p className="notes-text">
+      <LinkedText text={text} />
     </p>
+  );
+}
+
+/** The button that folds notes or long text away. */
+function FoldToggle({
+  task,
+  action,
+  expanded,
+  controls,
+  matches,
+  onToggle,
+}: {
+  task: Task;
+  action: string;
+  expanded: boolean;
+  controls: string;
+  matches: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="notes-toggle"
+      aria-expanded={expanded}
+      aria-controls={controls}
+      aria-label={`${action} for ${taskName(task)}${matches ? ' (matches your search)' : ''}`}
+      onClick={onToggle}
+    >
+      <span aria-hidden="true" className="notes-toggle__icon">
+        {expanded ? '▾' : '▸'}
+      </span>
+      {action}
+      {matches ? <span className="notes-match">matches your search</span> : null}
+    </button>
   );
 }
 
@@ -113,24 +233,16 @@ export function Notes({
 }) {
   const id = useId();
   if (!task.notes) return <p className="muted notes-empty">No notes</p>;
-  const action = expanded ? 'Hide notes' : 'Show notes';
-  const showMatch = matchInNotes && !expanded;
   return (
     <div className="notes">
-      <button
-        type="button"
-        className="notes-toggle"
-        aria-expanded={expanded}
-        aria-controls={id}
-        aria-label={`${action} for ${task.title || task.id || `row ${task.rowNumber}`}${showMatch ? ' (matches your search)' : ''}`}
-        onClick={onToggle}
-      >
-        <span aria-hidden="true" className="notes-toggle__icon">
-          {expanded ? '▾' : '▸'}
-        </span>
-        {action}
-        {showMatch ? <span className="notes-match">matches your search</span> : null}
-      </button>
+      <FoldToggle
+        task={task}
+        action={expanded ? 'Hide notes' : 'Show notes'}
+        expanded={expanded}
+        controls={id}
+        matches={matchInNotes && !expanded}
+        onToggle={onToggle}
+      />
       <div id={id} className="notes-body" hidden={!expanded}>
         <NotesText text={task.notes} />
       </div>
@@ -158,5 +270,144 @@ export function TaskLinks({ task }: { task: Task }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Why the task sits where it does in Financial priority order. */
+export function WhyThisOrder({ task, today }: { task: Task; today: CalendarDate }) {
+  const reason = priorityReason(task, today);
+  return (
+    <p className="why-order">
+      <span className="why-order__label">Why this order:</span> {reason.text}
+      {reason.note ? `. ${reason.note}` : null}
+    </p>
+  );
+}
+
+const BASIS_BADGE: Record<DelayCostBasis, { label: string; className: string }> = {
+  'avoidable charge': { label: 'Basis: avoidable charge', className: 'badge badge--basis-top' },
+  deadline: { label: 'Basis: deadline', className: 'badge badge--basis-top' },
+  opportunity: { label: 'Basis: opportunity', className: 'badge badge--basis-opportunity' },
+  'sunk or reference': { label: 'Basis: sunk or reference', className: 'badge' },
+  unknown: { label: 'Basis unknown', className: 'badge' },
+};
+
+/** The sheet's "Delay-cost basis" for the task: the sheet's own label, not something the dashboard checked. */
+export function BasisBadge({ task }: { task: Task }) {
+  if (task.basis === null) {
+    return <span className="badge badge--warning badge--wrap">Basis not recognised: {task.rawBasis}</span>;
+  }
+  const badge = BASIS_BADGE[task.basis];
+  return <span className={`${badge.className} badge--wrap`}>{badge.label}</span>;
+}
+
+/** One free-text cell, shown as written. Long text shows its beginning until `full` is set. */
+function DetailText({ text, full }: { text: string; full: boolean }) {
+  if (!text) return <span className="muted">Not recorded</span>;
+  const preview = clipText(text);
+  const folded = preview.clipped && !full;
+  return (
+    <span className="detail-text">
+      <LinkedText text={folded ? preview.text : text} />
+      {folded ? '…' : null}
+    </span>
+  );
+}
+
+/**
+ * Progress, Money at stake (with its basis badge), Hands-on effort and
+ * Expected finish as separate labelled lines. A line appears when the sheet
+ * has its column; a blank cell reads "Not recorded". A sheet with a basis
+ * column but no Money at stake column gets a "Delay-cost basis" line instead.
+ * Long text is folded behind one "Show full text" toggle per task.
+ */
+export function TaskDetails({
+  task,
+  columns,
+  expanded,
+  onToggle,
+  matchInFoldedText,
+}: {
+  task: Task;
+  columns: SheetColumns;
+  expanded: boolean;
+  onToggle: () => void;
+  matchInFoldedText: boolean;
+}) {
+  const id = useId();
+  if (!hasDetailColumns(columns)) return null;
+  const foldable = DETAIL_FIELDS.some((field) => clipText(task[field]).clipped);
+  return (
+    <div className="task-details">
+      <dl className="task-meta" id={id}>
+        {columns.progress ? (
+          <div>
+            <dt>Progress</dt>
+            <dd>
+              <DetailText text={task.progress} full={expanded} />
+            </dd>
+          </div>
+        ) : null}
+        {columns.moneyAtStake ? (
+          <div>
+            <dt>Money at stake</dt>
+            <dd>
+              <DetailText text={task.moneyAtStake} full={expanded} />
+              {columns.basis ? (
+                <>
+                  {' '}
+                  <BasisBadge task={task} />
+                </>
+              ) : null}
+            </dd>
+          </div>
+        ) : columns.basis ? (
+          <div>
+            <dt>Delay-cost basis</dt>
+            <dd>
+              <BasisBadge task={task} />
+            </dd>
+          </div>
+        ) : null}
+        {columns.effort ? (
+          <div>
+            <dt>Hands-on effort</dt>
+            <dd>
+              <DetailText text={task.effort} full={expanded} />
+            </dd>
+          </div>
+        ) : null}
+        {columns.expectedFinish ? (
+          <div>
+            <dt>Expected finish</dt>
+            <dd>
+              <DetailText text={task.expectedFinish} full={expanded} />
+              {task.expectedFinish ? (
+                task.status === 'waiting on someone else' ? (
+                  <>
+                    {' '}
+                    <span className="badge badge--waiting-on-someone-else badge--wrap">
+                      Includes waiting on someone else
+                    </span>
+                  </>
+                ) : (
+                  <span className="detail-note muted">Includes any waiting on others, not just hands-on time.</span>
+                )
+              ) : null}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {foldable ? (
+        <FoldToggle
+          task={task}
+          action={expanded ? 'Show less text' : 'Show full text'}
+          expanded={expanded}
+          controls={id}
+          matches={matchInFoldedText && !expanded}
+          onToggle={onToggle}
+        />
+      ) : null}
+    </div>
   );
 }

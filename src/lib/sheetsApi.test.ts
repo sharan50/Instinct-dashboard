@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildValuesUrl, classifyError, fetchSheetValues, SheetsApiError, type FetchValuesOptions } from './sheetsApi.ts';
+import {
+  buildValuesUrl,
+  classifyError,
+  fetchSheetValues,
+  SheetsApiError,
+  SHEETS_READONLY_SCOPE,
+  TASKS_RANGE,
+  type FetchValuesOptions,
+} from './sheetsApi.ts';
+import { COLUMNS, LAST_ROW_READ, OPTIONAL_COLUMNS } from './tasks.ts';
 
 const SHEET_ID = 'sheet-id-for-tests-0000000000';
 
@@ -48,6 +57,22 @@ describe('buildValuesUrl', () => {
     expect(buildValuesUrl(SHEET_ID)).toBe(
       `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE`,
     );
+  });
+});
+
+describe('the range that is read', () => {
+  it('is wide enough for every column the dashboard knows, wherever the sheet puts it', () => {
+    const [, lastColumn = '', lastRow] = /^Tasks!A1:([A-Z]+)(\d+)$/.exec(TASKS_RANGE) ?? [];
+    expect(lastColumn).toBe('Z');
+    expect(Number(lastRow)).toBe(LAST_ROW_READ);
+    // 6 required + 8 optional columns end at column N; the range goes well past column M.
+    const known = Object.keys(COLUMNS).length + Object.keys(OPTIONAL_COLUMNS).length;
+    expect(known).toBe(14);
+    expect(lastColumn.charCodeAt(0) - 64).toBeGreaterThanOrEqual(known);
+  });
+
+  it('is still read with the read-only permission only', () => {
+    expect(SHEETS_READONLY_SCOPE).toBe('https://www.googleapis.com/auth/spreadsheets.readonly');
   });
 });
 

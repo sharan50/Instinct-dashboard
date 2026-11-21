@@ -1,8 +1,7 @@
 import { useId } from 'react';
-import type { StatusKey } from '../lib/filters.ts';
-import { STATUS_LABELS, STATUSES } from '../lib/tasks.ts';
-
-export type View = 'list' | 'deadlines';
+import type { SortOrder, StatusKey, View } from '../lib/filters.ts';
+import { PROMOTION_WINDOW_DAYS } from '../lib/priority.ts';
+import { OPTIONAL_COLUMNS, STATUS_LABELS, STATUSES, type SheetColumns } from '../lib/tasks.ts';
 
 function statusLabel(key: StatusKey): string {
   return key === 'unknown' ? 'Needs a valid status' : STATUS_LABELS[key];
@@ -64,27 +63,157 @@ export function SearchBox({ value, onChange }: { value: string; onChange: (value
   );
 }
 
-export function ViewSwitch({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+/** Radio buttons drawn as one row of segments. The caller supplies the group around them. */
+function Segments<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   const name = useId();
-  const options: { value: View; label: string }[] = [
-    { value: 'list', label: 'All tasks' },
-    { value: 'deadlines', label: 'Deadlines' },
-  ];
   return (
-    <fieldset className="view-switch">
-      <legend className="visually-hidden">View</legend>
+    <>
       {options.map((option) => (
         <label key={option.value} className="view-switch__option">
           <input
             type="radio"
             name={name}
             value={option.value}
-            checked={view === option.value}
+            checked={value === option.value}
             onChange={() => onChange(option.value)}
           />
           <span>{option.label}</span>
         </label>
       ))}
+    </>
+  );
+}
+
+const VIEWS: readonly { value: View; label: string }[] = [
+  { value: 'list', label: 'All tasks' },
+  { value: 'deadlines', label: 'By date' },
+  { value: 'you-requested', label: 'You requested' },
+  { value: 'inbound', label: 'Inbound' },
+];
+
+/** All tasks, the date groups, and one view per origin. */
+export function ViewSwitch({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+  return (
+    <fieldset className="view-switch view-switch--views">
+      <legend className="visually-hidden">View</legend>
+      <Segments options={VIEWS} value={view} onChange={onChange} />
     </fieldset>
+  );
+}
+
+const ORDERS: readonly { value: SortOrder; label: string }[] = [
+  { value: 'priority', label: 'Financial priority' },
+  { value: 'date', label: 'Recorded date' },
+];
+
+export function SortControl({ order, onChange }: { order: SortOrder; onChange: (order: SortOrder) => void }) {
+  const labelId = useId();
+  return (
+    <div className="sort">
+      <span id={labelId} className="sort__label">
+        Sort by
+      </span>
+      <fieldset className="view-switch" aria-labelledby={labelId}>
+        <Segments options={ORDERS} value={order} onChange={onChange} />
+      </fieldset>
+    </div>
+  );
+}
+
+/**
+ * The ordering rules in plain words, so the order can be checked against the
+ * sheet, with what the order can't tell you: it is not a ranking by size.
+ */
+export function OrderExplainer({ columns }: { columns: SheetColumns }) {
+  return (
+    <details className="order-help">
+      <summary>How Financial priority works</summary>
+      <p>
+        It uses only these cells of the sheet: <strong>{OPTIONAL_COLUMNS.basis}</strong>, <strong>Deadline</strong>{' '}
+        (shown here as the recorded date), <strong>{OPTIONAL_COLUMNS.dateVerification}</strong> and whether the
+        Status is done. It never reads amounts or dates out of Money at stake, Progress or other text, and an entry in
+        Money at stake does not move a task up.
+      </p>
+      <ol>
+        <li>Basis first: avoidable charge and deadline, then opportunity, then unknown or blank, then sunk or reference.</li>
+        <li>
+          Within each of those: verified dates first, earliest first; then planning or unknown dates, earliest first;
+          then tasks with no date, in sheet order.
+        </li>
+        <li>
+          One fixed rule, for opportunity tasks only: an opportunity task whose verified date is today or within the
+          next {PROMOTION_WINDOW_DAYS} days goes above avoidable-charge and deadline tasks that have no verified date,
+          and so above the opportunity tasks that were not moved. A verified date that has passed does not move a task
+          up: the task stays with the other opportunity tasks, ahead of those without a verified date. Tasks with any
+          other basis, a blank one included, are never moved, whatever their date.
+        </li>
+        <li>Done tasks, when shown, come last.</li>
+      </ol>
+      <p>
+        <strong>This is a fixed rule, not a judgement of how much is at stake.</strong> The dashboard cannot compare
+        amounts, currencies or the real cost of an opportunity, so the order reflects only the basis label, the
+        recorded date and whether that date is verified. The {PROMOTION_WINDOW_DAYS}-day window is an arbitrary fixed
+        threshold.
+      </p>
+      <p>
+        The basis and the dates are what the sheet says; the dashboard can’t check them. A recorded date may be a
+        planning or check date. One that is not verified only puts its task ahead of tasks with no date in the same
+        basis group: it never outranks a verified date and never moves a task to another group. Neither a date nor a
+        Money at stake entry proves a loss. When a verified date has passed, the dashboard does not know whether a
+        consequence applies now.
+      </p>
+      {columns.basis ? null : (
+        <p>
+          The Tasks tab has no “{OPTIONAL_COLUMNS.basis}” column yet, so every task counts as basis unknown.
+        </p>
+      )}
+      {columns.dateVerification ? null : (
+        <p>
+          The Tasks tab has no “{OPTIONAL_COLUMNS.dateVerification}” column yet, so no date counts as verified.
+        </p>
+      )}
+      <p>
+        <strong>Recorded date</strong> switches back to the earlier order: earliest recorded date first, tasks with
+        no date last.
+      </p>
+    </details>
+  );
+}
+
+/**
+ * Tasks whose Origin is blank or not one of the two values are in neither
+ * origin view. This keeps them visible as a count instead of dropping them.
+ * The sentence after the count only appears where it is needed: in an origin
+ * view (the tasks are not on screen there) or when the sheet has no Origin
+ * column at all. Elsewhere the tasks carry an "Origin missing" badge.
+ */
+export function OriginNote({
+  missing,
+  hasColumn,
+  inOriginView,
+}: {
+  missing: number;
+  hasColumn: boolean;
+  inOriginView: boolean;
+}) {
+  if (missing === 0) return null;
+  let why: string | null = null;
+  if (!hasColumn) why = 'The Tasks tab has no Origin column yet, so You requested and Inbound stay empty.';
+  else if (inOriginView) why = 'Tasks without a valid Origin are in All tasks and By date, not in this view.';
+  return (
+    <p className="origin-note">
+      <strong>
+        Origin missing: {missing} {missing === 1 ? 'task' : 'tasks'}.
+      </strong>
+      {why ? ` ${why}` : null}
+    </p>
   );
 }
