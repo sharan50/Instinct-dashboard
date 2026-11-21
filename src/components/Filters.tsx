@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { SortOrder, StatusKey, View } from '../lib/filters.ts';
+import type { AreaCount, SortOrder, StatusKey, View } from '../lib/filters.ts';
 import { PROMOTION_WINDOW_DAYS } from '../lib/priority.ts';
 import { OPTIONAL_COLUMNS, STATUS_LABELS, STATUSES, type SheetColumns } from '../lib/tasks.ts';
 
@@ -63,6 +63,76 @@ export function SearchBox({ value, onChange }: { value: string; onChange: (value
   );
 }
 
+/** What the picker passes for "every area". An area's own key is never this: keys are lower case. */
+const ALL_AREAS = 'ALL';
+
+/**
+ * One area at a time, from the sheet's "Area" column. Each option says how many
+ * of the area's tasks are not done. "No area" only appears when some task has none.
+ */
+export function AreaFilter({
+  areas,
+  value,
+  onChange,
+}: {
+  areas: readonly AreaCount[];
+  /** An areaKey; "" for the tasks with no area; null for every area. */
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="area-filter">
+      <label htmlFor={id}>Area</label>
+      <select
+        id={id}
+        value={value ?? ALL_AREAS}
+        onChange={(event) => onChange(event.target.value === ALL_AREAS ? null : event.target.value)}
+      >
+        <option value={ALL_AREAS}>All areas</option>
+        {areas.map((area) => (
+          <option key={area.key} value={area.key}>
+            {area.name || 'No area'} ({area.notDone} not done)
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Tasks whose Start date is still ahead are left out until this is ticked. The
+ * count keeps them visible, so they are never dropped silently. Only drawn
+ * when there are such tasks.
+ */
+export function NotStartedToggle({
+  count,
+  checked,
+  onChange,
+}: {
+  count: number;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <label className="chip chip--not-started">
+      <input
+        type="checkbox"
+        className="chip__input"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        aria-label={`Show tasks that have not started yet, ${count} ${count === 1 ? 'task' : 'tasks'}`}
+      />
+      <span className="chip__body" aria-hidden="true">
+        <span className="chip__check" />
+        <span className="chip__label">Not started yet</span>
+        <span className="chip__count">{count}</span>
+      </span>
+    </label>
+  );
+}
+
 /** Radio buttons drawn as one row of segments. The caller supplies the group around them. */
 function Segments<T extends string>({
   options,
@@ -93,13 +163,15 @@ function Segments<T extends string>({
 }
 
 const VIEWS: readonly { value: View; label: string }[] = [
+  { value: 'today', label: 'Today' },
   { value: 'list', label: 'All tasks' },
   { value: 'deadlines', label: 'By date' },
   { value: 'you-requested', label: 'You requested' },
   { value: 'inbound', label: 'Inbound' },
+  { value: 'review', label: 'Review' },
 ];
 
-/** All tasks, the date groups, and one view per origin. */
+/** Today, all tasks, the date groups, one view per origin, and the review list. */
 export function ViewSwitch({ view, onChange }: { view: View; onChange: (view: View) => void }) {
   return (
     <fieldset className="view-switch view-switch--views">

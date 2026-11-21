@@ -65,9 +65,9 @@ describe('the range that is read', () => {
     const [, lastColumn = '', lastRow] = /^Tasks!A1:([A-Z]+)(\d+)$/.exec(TASKS_RANGE) ?? [];
     expect(lastColumn).toBe('Z');
     expect(Number(lastRow)).toBe(LAST_ROW_READ);
-    // 6 required + 8 optional columns end at column N; the range goes well past column M.
+    // 6 required + 11 optional columns end at column Q; the range goes well past it.
     const known = Object.keys(COLUMNS).length + Object.keys(OPTIONAL_COLUMNS).length;
-    expect(known).toBe(14);
+    expect(known).toBe(17);
     expect(lastColumn.charCodeAt(0) - 64).toBeGreaterThanOrEqual(known);
   });
 

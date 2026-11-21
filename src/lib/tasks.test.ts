@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FULL_HEADER, HEADER, planningValues, sampleValues } from '../test/fixtures.ts';
+import { FULL_HEADER, HEADER, LIFE_HEADER, lifeValues, LONG_NEXT_STEP, planningValues, sampleValues } from '../test/fixtures.ts';
 import {
   columnLetter,
   hasDetailColumns,
@@ -185,6 +185,9 @@ describe('optional columns', () => {
     basis: false,
     expectedFinish: false,
     dateVerification: false,
+    area: false,
+    start: false,
+    nextStep: false,
   };
 
   it('works with none of them: every new field is blank or at its default', () => {
@@ -219,6 +222,9 @@ describe('optional columns', () => {
       basis: true,
       expectedFinish: true,
       dateVerification: true,
+      area: false,
+      start: false,
+      nextStep: false,
     });
     expect(tasks[0]).toMatchObject({
       id: 'P01',
@@ -408,5 +414,91 @@ describe('Date verified', () => {
         message: 'Row 2 (T1): Date verified says “verified” but the Deadline cell is empty, so there is no date to rank by.',
       },
     ]);
+  });
+});
+
+describe('Area, Start and Next step', () => {
+  it('reads them by header name, at the far end of the sheet', () => {
+    // 17 headers: Area, Start and Next step are columns O, P and Q.
+    expect(LIFE_HEADER).toHaveLength(17);
+    expect(['area', 'start', 'nextStep'].map((field) => columnLetter(LIFE_HEADER.indexOf(OPTIONAL_COLUMNS[field as 'area'])))).toEqual([
+      'O',
+      'P',
+      'Q',
+    ]);
+    const { tasks, issues, columns } = parseTaskSheet(lifeValues());
+    expect(issues).toEqual([]);
+    expect(columns).toMatchObject({ area: true, start: true, nextStep: true });
+    expect(tasks.find((t) => t.id === 'L01')).toMatchObject({ area: 'Home', start: null, rawStart: '', nextStep: 'Ring the engineer for a slot' });
+    expect(tasks.find((t) => t.id === 'L08')).toMatchObject({ area: 'Garden', start: { iso: '2026-11-10' }, rawStart: '2026-11-10' });
+    expect(tasks.find((t) => t.id === 'L05')?.nextStep).toBe(LONG_NEXT_STEP);
+    // The Sheets API drops trailing empty cells: a row that ends before these columns has blank ones.
+    expect(tasks.find((t) => t.id === 'L04')).toMatchObject({ area: 'Travel', start: null, nextStep: '' });
+  });
+
+  it('leaves them blank when the sheet has none of the three columns', () => {
+    const { tasks, columns } = parseTaskSheet(planningValues());
+    expect(columns).toMatchObject({ area: false, start: false, nextStep: false });
+    for (const task of tasks) expect(task).toMatchObject({ area: '', start: null, rawStart: '', nextStep: '' });
+  });
+
+  it('finds them in any order and letter case, on their own', () => {
+    const { tasks, columns } = parseTaskSheet([
+      ['next  STEP', 'Task ID', 'Task', 'AREA', 'Status', 'Deadline', 'Last update', 'Notes', 'start'],
+      ['Ring them', 'A1', 'First', '  Home ', 'open', '', '', '', '2026-11-02'],
+    ]);
+    expect(columns).toMatchObject({ area: true, start: true, nextStep: true, origin: false, basis: false });
+    expect(tasks[0]).toMatchObject({ id: 'A1', area: 'Home', nextStep: 'Ring them', start: { iso: '2026-11-02' } });
+  });
+
+  it('does not mistake a similar header for one of them', () => {
+    const { tasks, columns } = parseTaskSheet([
+      [...HEADER, 'Areas', 'Start date', 'Next steps', 'Started'],
+      ['T1', 'A', 'open', '', '', '', 'Home', '2026-11-02', 'Ring them', 'yes'],
+    ]);
+    expect(columns).toMatchObject({ area: false, start: false, nextStep: false });
+    expect(tasks[0]).toMatchObject({ area: '', start: null, nextStep: '' });
+  });
+
+  it('keeps Area and Next step exactly as written and never reads a date out of them', () => {
+    const { tasks, issues } = parseTaskSheet([
+      [...HEADER, 'Area', 'Next step'],
+      ['T1', 'A', 'open', '', '', '', 'Home & garden', 'Pay 40 by 2026-10-05\nthen <b>call</b>'],
+    ]);
+    expect(issues).toEqual([]);
+    expect(tasks[0]).toMatchObject({
+      area: 'Home & garden',
+      nextStep: 'Pay 40 by 2026-10-05\nthen <b>call</b>',
+      deadline: null,
+      start: null,
+    });
+  });
+
+  it('reports a Start that is not a YYYY-MM-DD date and treats the task as started', () => {
+    const { tasks, issues } = parseTaskSheet([
+      [...HEADER, 'Start'],
+      ['T1', 'A', 'open', '', '', '', 'next spring'],
+      ['T2', 'B', 'open', '', '', '', '2026-02-30'],
+      ['T3', 'C', 'open', '', '', '', '2026-11-10'],
+      ['T4', 'D', 'open', '', '', '', ''],
+    ]);
+    expect(tasks.map((t) => t.start?.iso ?? null)).toEqual([null, null, '2026-11-10', null]);
+    expect(tasks[0]).toMatchObject({ rawStart: 'next spring' });
+    expect(issues).toEqual([
+      {
+        kind: 'bad-start',
+        rowNumber: 2,
+        message: 'Row 2 (T1): start “next spring” is not a date written as YYYY-MM-DD. The task is treated as started.',
+      },
+      {
+        kind: 'bad-start',
+        rowNumber: 3,
+        message: 'Row 3 (T2): start “2026-02-30” is not a date written as YYYY-MM-DD. The task is treated as started.',
+      },
+    ]);
+  });
+
+  it('explains a duplicated column', () => {
+    expect(formatError([[...HEADER, 'Area', 'Start', 'area']]).details).toContain('“Area” appears more than once (columns G and I).');
   });
 });

@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { connect, hasHorizontalScroll, mockGoogle } from './helpers.ts';
+import { connect, hasHorizontalScroll, isoDate, lifeValues, mockGoogle, openView, sheetReply } from './helpers.ts';
 
 /** Presses Tab until `target` has focus. */
 async function tabTo(page: Page, target: Locator) {
@@ -11,9 +11,9 @@ async function tabTo(page: Page, target: Locator) {
   throw new Error('the element never received focus');
 }
 
-/** Opens every folded part of every task: the notes and any long text behind "Show full text". */
+/** Opens every folded part of every task: short cards, the notes and any long text behind "Show full text". */
 async function expandAllNotes(page: Page) {
-  for (const name of [/^Show notes for/, /^Show full text for/]) {
+  for (const name of [/^Show details for/, /^Show notes for/, /^Show full text for/]) {
     const show = page.getByRole('button', { name });
     while ((await show.count()) > 0) await show.first().click();
   }
@@ -23,6 +23,24 @@ async function expandAllNotes(page: Page) {
 function taskNames(page: Page): Promise<string[]> {
   return page.locator('.task-card .task-title, .task-title-cell > span:first-child').allTextContents();
 }
+
+/** Task names inside one group of the Today view. */
+function groupNames(page: Page, group: RegExp): Promise<string[]> {
+  return page.getByRole('region', { name: group }).locator('.task-title').allTextContents();
+}
+
+const LIFE = {
+  boiler: 'Book the boiler service',
+  form: 'Reply to the school trip form',
+  cleaning: 'Collect the dry cleaning',
+  railcard: 'Renew the railcard',
+  latch: 'Landlord to fix the gate latch',
+  invoice: 'Garage to send the invoice',
+  albums: 'Sort the photo albums',
+  beds: 'Plan the spring allotment beds',
+  books: 'Return the library books',
+  tyres: 'Swap the winter tyres',
+};
 
 const NAMES = {
   library: 'Renew library card',
@@ -58,6 +76,11 @@ test('connects, shows tasks and never needs sideways scrolling', async ({ page }
 
   await page.getByRole('button', { name: 'Connect Google account' }).click();
   await expect(page.getByText('Synced with your sheet')).toBeVisible();
+  // The dashboard opens on Today.
+  await expect(page.getByRole('radio', { name: 'Today' })).toBeChecked();
+  await expect(page.getByText('Showing 4 of 8 tasks')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+  await openView(page, 'All tasks');
   await expect(page.getByText('Showing 7 of 8 tasks')).toBeVisible();
   expect(sheetRequests).toEqual([
     'https://sheets.googleapis.com/v4/spreadsheets/test-spreadsheet-id-not-real-000000/values/Tasks!A1%3AZ1000?valueRenderOption=FORMATTED_VALUE Bearer fake-token',
@@ -109,6 +132,13 @@ test('works with the keyboard alone, with a visible focus ring', async ({ page }
   await page.keyboard.press('Enter');
   await expect(page.getByText('Synced with your sheet')).toBeVisible();
 
+  // The views come first; the arrow keys move between them.
+  const today = page.getByRole('radio', { name: 'Today' });
+  await tabTo(page, today);
+  expect(await today.evaluate((input) => getComputedStyle(input.nextElementSibling as Element).outlineStyle)).toBe('solid');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('radio', { name: 'All tasks' })).toBeChecked();
+
   const done = page.getByRole('checkbox', { name: /^Done/ });
   await tabTo(page, done);
   const ring = await done.evaluate((input) => getComputedStyle(input.nextElementSibling as Element).outlineStyle);
@@ -136,15 +166,25 @@ test('passes automated accessibility checks', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Connect Google account' }).click();
   await expect(page.getByText('Synced with your sheet')).toBeVisible();
+  // Today, first with its short cards closed, then with everything open.
+  await expectNoAccessibilityViolations(page);
+  await expandAllNotes(page);
+  await expectNoAccessibilityViolations(page);
+
+  await openView(page, 'All tasks');
   await expandAllNotes(page);
   await page.getByText('How Financial priority works').click();
   await expectNoAccessibilityViolations(page);
 
-  await page.getByText('Inbound', { exact: true }).first().click();
+  await openView(page, 'Inbound');
   await expect(page.getByText('Showing 2 of 8 tasks')).toBeVisible();
   await expectNoAccessibilityViolations(page);
 
-  await page.getByText('By date', { exact: true }).click();
+  await openView(page, 'By date');
+  await expectNoAccessibilityViolations(page);
+
+  await openView(page, 'Review');
+  await expandAllNotes(page);
   await expectNoAccessibilityViolations(page);
 });
 
@@ -160,6 +200,9 @@ test('shows notes and names as plain text', async ({ page }) => {
   await expect(page.getByText('<b>12</b> maybe')).toBeVisible();
   await expect(page.getByText('Origin not recognised: somewhere <i>else</i>')).toBeVisible();
   await expect(page.getByText('Date verified not recognised: maybe')).toBeVisible();
+  // And for Area and Next step.
+  await expect(page.getByText('Tests <b>bold</b>', { exact: true })).toBeVisible();
+  await expect(page.getByText('<img src=x onerror="window.__xss=3"> stays as text as well.')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
   await expect(page.locator('main img, main b, main i')).toHaveCount(0);
 });
@@ -276,19 +319,26 @@ test('stays readable on a 390px-wide phone', async ({ page }, testInfo) => {
   await mockGoogle(page);
   await connect(page);
   await expect(page.getByRole('table')).toHaveCount(0);
-  for (const view of ['All tasks', 'You requested', 'Inbound', 'By date']) {
-    await page.getByText(view, { exact: true }).first().click();
+  const overflowingCards = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.task-card')].filter((card) =>
+        [...card.querySelectorAll('*')].some((part) => part.getBoundingClientRect().right > card.getBoundingClientRect().right + 0.5),
+      ).length,
+    );
+  // Every view, with every short card, long text and note open: no sideways scrolling, nothing sticking out of its card.
+  for (const view of ['Today', 'All tasks', 'You requested', 'Inbound', 'By date', 'Review']) {
+    await openView(page, view);
     await expandAllNotes(page);
     expect(await hasHorizontalScroll(page), view).toBe(false);
+    expect(await overflowingCards(), view).toBe(0);
   }
-  // Nothing sticks out of its card either, with every long text and note open.
-  await page.getByText('All tasks', { exact: true }).click();
-  const overflowing = await page.evaluate(() =>
-    [...document.querySelectorAll('.task-card')].filter((card) =>
-      [...card.querySelectorAll('*')].some((part) => part.getBoundingClientRect().right > card.getBoundingClientRect().right + 0.5),
-    ).length,
-  );
-  expect(overflowing).toBe(0);
+  // The six views sit in a three-by-two grid that fits the screen.
+  const switchBox = await page.locator('.view-switch--views').boundingBox();
+  expect(switchBox?.width ?? 0).toBeLessThanOrEqual(390 - 32);
+  const tops = await page.locator('.view-switch--views .view-switch__option').evaluateAll((options) => [
+    ...new Set(options.map((option) => Math.round(option.getBoundingClientRect().top))),
+  ]);
+  expect(tops).toHaveLength(2);
 });
 
 test('never words a recorded date as due, overdue or enforced', async ({ page }) => {
@@ -297,10 +347,12 @@ test('never words a recorded date as due, overdue or enforced', async ({ page })
   await page.getByRole('checkbox', { name: /^Done/ }).check({ force: true });
   await expandAllNotes(page);
   await page.getByText('How Financial priority works').click();
-  for (const view of ['All tasks', 'You requested', 'Inbound', 'By date']) {
-    await page.getByText(view, { exact: true }).first().click();
-    expect(await page.locator('main').innerText(), view).not.toMatch(/overdue|\bdue\b|enforced/i);
+  for (const view of ['All tasks', 'You requested', 'Inbound', 'By date', 'Today', 'Review']) {
+    await openView(page, view);
+    await expandAllNotes(page);
+    expect(await page.locator('main').innerText(), view).not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
   }
+  await openView(page, 'All tasks');
   await expect(page.getByText('Recorded date', { exact: true }).first()).toBeVisible();
 });
 
@@ -312,6 +364,184 @@ test('shows links from the Links column as buttons that open in a new tab', asyn
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(link).toHaveAttribute('href', 'https://example.org/broadband/old');
   expect(await hasHorizontalScroll(page)).toBe(false);
+});
+
+test('opens on Today: your move, the next 7 days and who to chase, as short cards', async ({ page }, testInfo) => {
+  await mockGoogle(page, { sheets: [sheetReply(lifeValues())] });
+  await connect(page, 'Today');
+  await expect(page.getByRole('radio', { name: 'Today' })).toBeChecked();
+  expect(await groupNames(page, /^Your move/)).toEqual([LIFE.form, LIFE.boiler]);
+  // Verified dates first, then by date.
+  expect(await groupNames(page, /^Next 7 days/)).toEqual([LIFE.railcard, LIFE.cleaning, LIFE.tyres]);
+  // The longest without an update first.
+  expect(await groupNames(page, /^Chase/)).toEqual([LIFE.latch, LIFE.invoice]);
+  await expect(page.getByText('Showing 7 of 10 tasks')).toBeVisible();
+  await expect(page.getByText(/^1 more task that is not done is not on this screen/)).toBeVisible();
+  // No status chips, no sort order, and never a table: Today is cards on every screen.
+  await expect(page.getByRole('checkbox', { name: /^Done/ })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Financial priority' })).toHaveCount(0);
+  await expect(page.getByRole('table')).toHaveCount(0);
+
+  // A short card: the next step is on it, the notes are behind "Show details".
+  const boiler = page.getByRole('article', { name: LIFE.boiler });
+  await expect(boiler).toContainText('Next step: Ring the engineer for a slot');
+  await expect(boiler.getByText('Home', { exact: true })).toBeVisible();
+  await expect(boiler.getByRole('button', { name: /notes/i })).toHaveCount(0);
+  const details = boiler.getByRole('button', { name: `Show details for ${LIFE.boiler}` });
+  await expect(details).toHaveAttribute('aria-expanded', 'false');
+  await details.click();
+  await expect(boiler.getByRole('button', { name: `Hide details for ${LIFE.boiler}` })).toHaveAttribute('aria-expanded', 'true');
+  await boiler.getByRole('button', { name: `Show notes for ${LIFE.boiler}` }).click();
+  await expect(boiler.getByText('The engineer prefers mornings.')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+
+  // What "Show details" reveals comes after the toggle, inside the part it controls: the next Tab reaches it.
+  const form = page.getByRole('article', { name: LIFE.form });
+  await expect(form.getByRole('link', { name: /^Add to calendar: / })).toHaveCount(0);
+  const formDetails = form.getByRole('button', { name: `Show details for ${LIFE.form}` });
+  const controlled = await formDetails.getAttribute('aria-controls');
+  await formDetails.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await expect(form.getByRole('link', { name: /^Add to calendar: / })).toBeFocused();
+  await expect(page.locator(`[id="${controlled}"]`).getByRole('link', { name: /^Add to calendar: / })).toBeVisible();
+
+  // On a wide screen the three groups sit side by side; on a phone they are stacked.
+  const lefts = await page.locator('.today__group').evaluateAll((groups) => groups.map((group) => Math.round(group.getBoundingClientRect().left)));
+  expect(new Set(lefts).size).toBe(testInfo.project.name === 'phone' ? 1 : 3);
+
+  await page.getByRole('button', { name: 'See all tasks' }).click();
+  await expect(page.getByRole('radio', { name: 'All tasks' })).toBeChecked();
+  expect(await taskNames(page)).toContain(LIFE.albums);
+});
+
+test('never passes off an unreadable status or date as "not waiting on anyone"', async ({ page }) => {
+  const values = lifeValues();
+  values.push(['L11', 'Status typed wrongly', 'waiting on me', '', '', '']);
+  values.push(['L12', 'Date typed wrongly', 'open', '25/12/2026', '', '']);
+  await mockGoogle(page, { sheets: [sheetReply(values)] });
+  await connect(page, 'Today');
+  expect(await groupNames(page, /^Can’t be placed/)).toEqual(['Status typed wrongly', 'Date typed wrongly']);
+  await expect(page.getByText('Unknown status: waiting on me')).toBeVisible();
+  await expect(page.getByText('Not a YYYY-MM-DD date')).toBeVisible();
+  // The count of readable leftovers is unchanged, and the done task is counted too.
+  await expect(page.getByText(/^1 more task that is not done is not on this screen/)).toBeVisible();
+  await expect(page.getByText('1 done task is left out.')).toBeVisible();
+  await expect(page.getByText('Showing 9 of 12 tasks')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+
+  // A search that only matches a done task says so, instead of "no match".
+  await page.getByRole('searchbox', { name: 'Search tasks and notes' }).fill('library books');
+  await expect(page.getByText(/^1 matching task is done, and this view lists only tasks that are not done\./)).toBeVisible();
+});
+
+test('filters by area and keeps tasks that have not started behind a count', async ({ page }) => {
+  await mockGoogle(page, { sheets: [sheetReply(lifeValues())] });
+  await connect(page);
+  await expect(page.getByText('Showing 8 of 10 tasks')).toBeVisible();
+  expect(await taskNames(page)).not.toContain(LIFE.beds);
+
+  const notStarted = page.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' });
+  await expect(notStarted).not.toBeChecked();
+  await notStarted.check({ force: true });
+  await expect(page.getByText('Showing 9 of 10 tasks')).toBeVisible();
+  expect(await taskNames(page)).toContain(LIFE.beds);
+  // The badge on the task itself, not the chip's own label.
+  await expect(page.locator('.task-card .badge, .task-table .badge').filter({ hasText: 'Not started yet' })).toHaveCount(1);
+  await notStarted.uncheck({ force: true });
+
+  const area = page.getByRole('combobox', { name: 'Area' });
+  await expect(area.locator('option')).toHaveText([
+    'All areas',
+    'car (2 not done)',
+    'Family (1 not done)',
+    'Garden (1 not done)',
+    'Home (3 not done)',
+    'Travel (1 not done)',
+    'No area (1 not done)',
+  ]);
+  await area.selectOption({ label: 'car (2 not done)' });
+  await expect(page.getByText('Showing 2 of 10 tasks')).toBeVisible();
+  expect((await taskNames(page)).sort()).toEqual([LIFE.invoice, LIFE.tyres].sort());
+  // The area narrows the other views too.
+  await openView(page, 'Today');
+  expect(await groupNames(page, /^Your move/)).toEqual([]);
+  expect(await groupNames(page, /^Next 7 days/)).toEqual([LIFE.tyres]);
+  expect(await groupNames(page, /^Chase/)).toEqual([LIFE.invoice]);
+  await page.getByRole('button', { name: 'Reset filters' }).click();
+  await expect(area).toHaveValue('ALL');
+  await expect(page.getByText('Showing 7 of 10 tasks')).toBeVisible();
+  expect(await hasHorizontalScroll(page)).toBe(false);
+});
+
+test('lists what has gone quiet or is missing something under Review', async ({ page }) => {
+  await mockGoogle(page, { sheets: [sheetReply(lifeValues())] });
+  await connect(page, 'Review');
+  await expect(page.getByRole('heading', { level: 2, name: /^Needs a look/ })).toBeVisible();
+  expect(await taskNames(page)).toEqual([LIFE.latch, LIFE.tyres, LIFE.railcard, LIFE.albums]);
+  const flags = (name: string) => page.getByRole('article', { name }).getByRole('list', { name: 'Flagged for' }).getByRole('listitem');
+  await expect(flags(LIFE.latch)).toHaveText(['No update for 45 days', 'Waiting on someone else, no date']);
+  await expect(flags(LIFE.tyres)).toHaveText(['No last update recorded']);
+  await expect(flags(LIFE.railcard)).toHaveText(['No next step']);
+  await expect(flags(LIFE.albums)).toHaveText(['No area']);
+  await expect(page.locator('.review-checks li')).toHaveText([
+    'No update for 30 days or more: 1',
+    'No last update recorded: 1',
+    'Waiting on someone else with no recorded date: 1',
+    'No next step: 1',
+    'No area: 1',
+  ]);
+  await expect(page.getByText('Showing 4 of 10 tasks')).toBeVisible();
+  await expandAllNotes(page);
+  expect(await hasHorizontalScroll(page)).toBe(false);
+});
+
+test('offers "Add to calendar" for verified upcoming dates, as a plain link to Google Calendar', async ({ page }) => {
+  const hosts = new Set<string>();
+  page.on('request', (request) => hosts.add(new URL(request.url()).host));
+  await mockGoogle(page, { sheets: [sheetReply(lifeValues())] });
+  await connect(page);
+  const links = page.getByRole('link', { name: /^Add to calendar: / });
+  // Only the two verified dates ahead: not the planning date, not the dates nobody verified.
+  await expect(links).toHaveCount(2);
+  const link = page.getByRole('link', { name: `Add to calendar: ${LIFE.form} (opens Google Calendar in a new tab)` });
+  await expect(link).toHaveText('Add to calendar');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  const url = new URL((await link.getAttribute('href')) ?? '');
+  expect(url.origin + url.pathname).toBe('https://calendar.google.com/calendar/render');
+  const day = (offset: number) => isoDate(offset).replaceAll('-', '');
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    action: 'TEMPLATE',
+    text: LIFE.form,
+    dates: `${day(2)}/${day(3)}`,
+    details: 'Task L02 in the task tracker.',
+  });
+  // Showing the link contacts nobody: the calendar is only reached if the link is followed.
+  expect([...hosts]).not.toContain('calendar.google.com');
+});
+
+test('serves a web manifest and icons for a home-screen shortcut, and asks for a browser tab', async ({ page, request }) => {
+  await mockGoogle(page);
+  await page.goto('/');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/manifest.webmanifest');
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/icons/apple-touch-icon.png');
+
+  const reply = await request.get('/manifest.webmanifest');
+  expect(reply.status()).toBe(200);
+  const manifest = (await reply.json()) as { display: string; start_url: string; icons: { src: string; sizes: string }[] };
+  // What the site asks for; some phones open a home-screen icon as a web app regardless.
+  expect(manifest.display).toBe('browser');
+  for (const path of [...manifest.icons.map((icon) => `/${icon.src}`), '/icons/apple-touch-icon.png']) {
+    const icon = await request.get(path);
+    expect(icon.status(), path).toBe(200);
+    expect(icon.headers()['content-type'], path).toBe('image/png');
+    // The first bytes of every PNG file.
+    expect((await icon.body()).subarray(1, 4).toString(), path).toBe('PNG');
+  }
+  // Still no service worker and nothing stored: the icon is only a shortcut.
+  expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length)).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations)).toEqual([]);
 });
 
 test('explains a refused Google consent screen', async ({ page }) => {

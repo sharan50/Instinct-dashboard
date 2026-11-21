@@ -1,12 +1,13 @@
 import { Fragment, useId, type ReactNode } from 'react';
 import { useFormat } from '../format.ts';
+import { calendarUrl, offersCalendarLink } from '../lib/calendar.ts';
 import { formatCalendarDate, formatRelative, formatTimestamp, relativeDay, type CalendarDate } from '../lib/dates.ts';
-import { deadlineState } from '../lib/filters.ts';
+import { deadlineState, hasFoldedText, isNotStarted } from '../lib/filters.ts';
 import { splitLinks } from '../lib/linkify.ts';
 import { clipText } from '../lib/preview.ts';
 import { PASSED_NOTE, priorityReason } from '../lib/priority.ts';
+import { describeFlag, type ReviewFlag } from '../lib/review.ts';
 import {
-  DETAIL_FIELDS,
   hasDetailColumns,
   ORIGIN_LABELS,
   STATUS_LABELS,
@@ -35,6 +36,12 @@ export function StatusBadge({ task }: { task: Task }) {
   return (
     <span className={`badge badge--${task.status.replaceAll(' ', '-')}`}>{STATUS_LABELS[task.status]}</span>
   );
+}
+
+/** The part of life the task belongs to (the sheet's "Area" column). Nothing for a blank cell. */
+export function AreaBadge({ task }: { task: Task }) {
+  if (!task.area) return null;
+  return <span className="badge badge--area badge--wrap">{task.area}</span>;
 }
 
 /** Who started the task (the sheet's "Origin" column). A blank or wrong value is shown, not hidden. */
@@ -67,6 +74,26 @@ function VerificationBadge({ task }: { task: Task }) {
 }
 
 /**
+ * "Add to calendar": offered for a verified date that is today or later (see
+ * lib/calendar.ts). A plain link; nothing is sent unless it is followed.
+ */
+export function CalendarLink({ task, today }: { task: Task; today: CalendarDate }) {
+  if (!offersCalendarLink(task, today)) return null;
+  return (
+    <a
+      className="calendar-link"
+      href={calendarUrl(task) ?? undefined}
+      target="_blank"
+      rel="noopener noreferrer"
+      // Starts with the words on screen, so voice control can find the link by them.
+      aria-label={`Add to calendar: ${taskName(task)} (opens Google Calendar in a new tab)`}
+    >
+      Add to calendar
+    </a>
+  );
+}
+
+/**
  * The date from the sheet's Deadline column. It is a recorded date that may be
  * a planning or check date, so it is worded as a date ("in 3 days"), never as
  * something due or enforced, and always carries its "Date verified" badge.
@@ -74,15 +101,19 @@ function VerificationBadge({ task }: { task: Task }) {
  * `passedNote` adds, under a verified date that has passed, that the dashboard
  * does not know whether a consequence applies now. It is set wherever the
  * "why this order" line, which says the same, is not shown.
+ *
+ * `calendarLink` adds "Add to calendar" under the date (see CalendarLink).
  */
 export function RecordedDate({
   task,
   today,
   passedNote = false,
+  calendarLink = false,
 }: {
   task: Task;
   today: CalendarDate;
   passedNote?: boolean;
+  calendarLink?: boolean;
 }) {
   const format = useFormat();
   const state = deadlineState(task, today);
@@ -135,6 +166,30 @@ export function RecordedDate({
       <VerificationBadge task={task} />
       {passedNote && state.kind === 'overdue' && task.dateVerification === 'verified' ? (
         <span className="detail-note muted">{PASSED_NOTE}</span>
+      ) : null}
+      {calendarLink ? <CalendarLink task={task} today={today} /> : null}
+    </span>
+  );
+}
+
+/** The sheet's "Start": the first day the task can be acted on. Only drawn when the cell has something in it. */
+export function StartInfo({ task, today }: { task: Task; today: CalendarDate }) {
+  const format = useFormat();
+  if (!task.start) {
+    return (
+      <span>
+        “{task.rawStart}” <span className="badge badge--warning">Not a YYYY-MM-DD date</span>
+      </span>
+    );
+  }
+  return (
+    <span>
+      <time dateTime={task.start.iso}>{formatCalendarDate(task.start, format)}</time>
+      {isNotStarted(task, today) ? (
+        <>
+          {' '}
+          <span className="badge badge--unverified">Not started yet</span>
+        </>
       ) : null}
     </span>
   );
@@ -319,24 +374,20 @@ function DetailText({ text, full }: { text: string; full: boolean }) {
  * Expected finish as separate labelled lines. A line appears when the sheet
  * has its column; a blank cell reads "Not recorded". A sheet with a basis
  * column but no Money at stake column gets a "Delay-cost basis" line instead.
- * Long text is folded behind one "Show full text" toggle per task.
+ * Long text shows its beginning until `expanded` is set (see FullTextToggle).
  */
 export function TaskDetails({
   task,
   columns,
   expanded,
-  onToggle,
-  matchInFoldedText,
+  id,
 }: {
   task: Task;
   columns: SheetColumns;
   expanded: boolean;
-  onToggle: () => void;
-  matchInFoldedText: boolean;
+  id: string;
 }) {
-  const id = useId();
   if (!hasDetailColumns(columns)) return null;
-  const foldable = DETAIL_FIELDS.some((field) => clipText(task[field]).clipped);
   return (
     <div className="task-details">
       <dl className="task-meta" id={id}>
@@ -398,16 +449,82 @@ export function TaskDetails({
           </div>
         ) : null}
       </dl>
-      {foldable ? (
-        <FoldToggle
-          task={task}
-          action={expanded ? 'Show less text' : 'Show full text'}
-          expanded={expanded}
-          controls={id}
-          matches={matchInFoldedText && !expanded}
-          onToggle={onToggle}
-        />
-      ) : null}
     </div>
+  );
+}
+
+/** The very next thing to do (the sheet's "Next step"), ahead of everything else about the task. */
+export function NextStep({ task, full, id }: { task: Task; full: boolean; id: string }) {
+  return (
+    <p className="next-step" id={id}>
+      <span className="next-step__label">Next step:</span> <DetailText text={task.nextStep} full={full} />
+    </p>
+  );
+}
+
+/** One toggle per task for all of its long text. Drawn only when something is folded. */
+export function FullTextToggle({
+  task,
+  expanded,
+  controls,
+  matchInFoldedText,
+  onToggle,
+}: {
+  task: Task;
+  expanded: boolean;
+  /** The ids of the parts of the task that hold the text, separated by spaces. */
+  controls: string;
+  matchInFoldedText: boolean;
+  onToggle: () => void;
+}) {
+  if (!hasFoldedText(task)) return null;
+  return (
+    <FoldToggle
+      task={task}
+      action={expanded ? 'Show less text' : 'Show full text'}
+      expanded={expanded}
+      controls={controls}
+      matches={matchInFoldedText && !expanded}
+      onToggle={onToggle}
+    />
+  );
+}
+
+/** Opens and closes a short card (the Today and Review views). */
+export function DetailsToggle({
+  task,
+  open,
+  controls,
+  matches,
+  onToggle,
+}: {
+  task: Task;
+  open: boolean;
+  controls: string;
+  matches: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <FoldToggle
+      task={task}
+      action={open ? 'Hide details' : 'Show details'}
+      expanded={open}
+      controls={controls}
+      matches={matches && !open}
+      onToggle={onToggle}
+    />
+  );
+}
+
+/** What the Review view flags a task for. */
+export function ReviewFlags({ flags }: { flags: readonly ReviewFlag[] }) {
+  return (
+    <ul className="review-flags" aria-label="Flagged for">
+      {flags.map((flag) => (
+        <li key={flag.kind} className="badge badge--warning badge--wrap">
+          {describeFlag(flag)}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -5,7 +5,7 @@ import { App } from './App.tsx';
 import { readConfig } from './config.ts';
 import type { FormatOptions } from './lib/dates.ts';
 import { createFakeGoogle, errorResponse, scriptedFetch, valuesResponse, type FakeGoogle } from './test/fakeGoogle.ts';
-import { FULL_HEADER, HEADER, planningValues, sampleValues } from './test/fixtures.ts';
+import { FULL_HEADER, HEADER, LIFE_HEADER, lifeValues, planningValues, sampleValues } from './test/fixtures.ts';
 import { setWideScreen } from './test/viewport.ts';
 
 const CLIENT_ID = '123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com';
@@ -43,9 +43,23 @@ function setup({
   return { user, fetchImpl, ...view };
 }
 
-async function connect(user: ReturnType<typeof userEvent.setup>) {
+/** Connects and stays on the view the dashboard opens with (Today). */
+async function connectOnly(user: ReturnType<typeof userEvent.setup>) {
   await settle();
   await user.click(screen.getByRole('button', { name: 'Connect Google account' }));
+  await settle();
+}
+
+/** Connects, then switches to All tasks when the dashboard is up: most tests are about the list. */
+async function connect(user: ReturnType<typeof userEvent.setup>) {
+  await connectOnly(user);
+  const allTasks = screen.queryByRole('radio', { name: 'All tasks' });
+  if (allTasks) await user.click(allTasks);
+}
+
+/** Presses Refresh and lets the next scripted answer arrive. */
+async function refresh(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
   await settle();
 }
 
@@ -76,6 +90,25 @@ const why = (task: HTMLElement) => (task.querySelector('.why-order')?.textConten
 function setupPlanning() {
   return setup({ fetchImpl: scriptedFetch(valuesResponse(planningValues())) });
 }
+
+/** The invented rows that also use Area, Start and Next step (see lifeValues). */
+function setupLife(values: string[][] = lifeValues()) {
+  return setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+}
+
+const LIFE = {
+  L01: 'Book the boiler service',
+  L02: 'Reply to the school trip form',
+  L03: 'Collect the dry cleaning',
+  L04: 'Renew the railcard',
+  L05: 'Landlord to fix the gate latch',
+  L06: 'Garage to send the invoice',
+  L07: 'Sort the photo albums',
+  L08: 'Plan the spring allotment beds',
+  L09: 'Return the library books',
+  L10: 'Swap the winter tyres',
+  L11: 'Chase the deposit refund',
+};
 
 const PLANNING = {
   P01: 'Return the rented ladder',
@@ -419,7 +452,14 @@ describe('origin views', () => {
     const { user } = setupPlanning();
     await connect(user);
     const views = within(screen.getByRole('group', { name: 'View' })).getAllByRole('radio');
-    expect(views.map((radio) => radio.closest('label')?.textContent)).toEqual(['All tasks', 'By date', 'You requested', 'Inbound']);
+    expect(views.map((radio) => radio.closest('label')?.textContent)).toEqual([
+      'Today',
+      'All tasks',
+      'By date',
+      'You requested',
+      'Inbound',
+      'Review',
+    ]);
     expect(screen.getByRole('radio', { name: 'All tasks' })).toBeChecked();
   });
 
@@ -758,6 +798,54 @@ describe('a verified date that has passed', () => {
     expect(['Verified and passed', 'Planning and passed', 'Verified and ahead'].map(passedOn)).toEqual([1, 0, 0]);
   });
 
+  it('says so once on short cards too, closed and open, in Today and in Review', async () => {
+    const short = [
+      [...HEADER, 'Delay-cost basis', 'Date verified'],
+      ['T1', 'Mine, verified and passed', 'waiting on you', '2026-10-18', '', '', 'opportunity', 'verified'],
+      ['T2', 'Theirs, verified and passed', 'waiting on someone else', '2026-10-18', '', '', '', 'verified'],
+      ['T3', 'Theirs, planning and passed', 'waiting on someone else', '2026-10-19', '', '', '', 'planning'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(short)) });
+    await connectOnly(user);
+    const titles = ['Mine, verified and passed', 'Theirs, verified and passed', 'Theirs, planning and passed'];
+    const times = () => titles.map((title) => (card(title).textContent ?? '').split(PASSED).length - 1);
+    const openAll = async () => {
+      for (const button of screen.getAllByRole('button', { name: /^Show details for/ })) await user.click(button);
+    };
+    const closeAll = async () => {
+      for (const button of screen.getAllByRole('button', { name: /^Hide details for/ })) await user.click(button);
+    };
+
+    // Today: Your move (which shows the why line once open) and Chase (which never does).
+    expect(times()).toEqual([1, 1, 0]);
+    await openAll();
+    expect(why(card('Mine, verified and passed'))).toContain(PASSED);
+    expect(times()).toEqual([1, 1, 0]);
+    await closeAll();
+
+    // Review: all three are flagged (no update recorded), none shows the why line.
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(cardTitles().sort()).toEqual([...titles].sort());
+    expect(times()).toEqual([1, 1, 0]);
+    await openAll();
+    expect(times()).toEqual([1, 1, 0]);
+  });
+
+  it('says so once per row in the wide table, in both sort orders', async () => {
+    setWideScreen(true);
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    const times = () =>
+      ['Verified and passed', 'Planning and passed', 'Verified and ahead'].map((title) => {
+        const row = screen.getByRole('rowheader', { name: new RegExp(`^${title}`) }).closest('tr') as HTMLElement;
+        return (row.textContent ?? '').split(PASSED).length - 1;
+      });
+    expect(times()).toEqual([1, 0, 0]);
+    await user.click(screen.getByRole('radio', { name: 'Recorded date' }));
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+    expect(times()).toEqual([1, 0, 0]);
+  });
+
   it('follows the calendar: after midnight a date that was today has passed, and its move has ended', async () => {
     const today = [
       [...HEADER, 'Delay-cost basis', 'Date verified'],
@@ -868,14 +956,23 @@ describe('progress on each task', () => {
     expect(screen.queryByText(/^Basis/, { selector: '.badge' })).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        'Optional columns found in the Tasks tab: none. Not found, so not shown: Links, Origin, Money at stake, Progress, Hands-on effort, Delay-cost basis, Expected finish incl. waits, Date verified.',
+        'Optional columns found in the Tasks tab: none. Not found, so not shown: Links, Origin, Money at stake, Progress, Hands-on effort, Delay-cost basis, Expected finish incl. waits, Date verified, Area, Start, Next step.',
       ),
     ).toBeInTheDocument();
     unmount();
 
-    const full = setupPlanning();
-    await connect(full.user);
-    expect(screen.getByText(`Optional columns found in the Tasks tab: ${FULL_HEADER.slice(HEADER.length).join(', ')}.`)).toBeInTheDocument();
+    const planning = setupPlanning();
+    await connect(planning.user);
+    expect(
+      screen.getByText(
+        `Optional columns found in the Tasks tab: ${FULL_HEADER.slice(HEADER.length).join(', ')}. Not found, so not shown: Area, Start, Next step.`,
+      ),
+    ).toBeInTheDocument();
+    planning.unmount();
+
+    const life = setupLife();
+    await connect(life.user);
+    expect(screen.getByText(`Optional columns found in the Tasks tab: ${LIFE_HEADER.slice(HEADER.length).join(', ')}.`)).toBeInTheDocument();
   });
 
   it('adds a line only for a column the sheet has, even when it has just one of them', async () => {
@@ -990,6 +1087,864 @@ describe('progress on each task', () => {
   });
 });
 
+/** The task names in one group of the Today view, in order. */
+const group = (name: RegExp) =>
+  within(screen.getByRole('region', { name })).queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+
+describe('today view', () => {
+  it('opens on Today: your move, the next 7 days and who to chase, each task once', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(screen.getByRole('radio', { name: 'Today' })).toBeChecked();
+    expect(group(/^Your move/)).toEqual([LIFE.L02, LIFE.L01]);
+    // Verified dates first, then the rest by date. L11 is waiting on someone else, but its date is this week.
+    expect(group(/^Next 7 days/)).toEqual([LIFE.L04, LIFE.L03, LIFE.L11, LIFE.L10]);
+    // The longest without an update first.
+    expect(group(/^Chase/)).toEqual([LIFE.L05, LIFE.L06]);
+    expect(new Set(cardTitles()).size).toBe(8);
+    expect(cardTitles()).toHaveLength(8);
+    expect(screen.getByRole('heading', { level: 2, name: 'Your move 2' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Next 7 days 4' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Chase 2' })).toBeInTheDocument();
+    expect(screen.getByText('Showing 8 of 11 tasks')).toBeInTheDocument();
+  });
+
+  it('has no status chips or sort order, and says how many tasks it leaves out', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(screen.queryByRole('checkbox', { name: /^Done/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Financial priority' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Origin missing/)).not.toBeInTheDocument();
+    // Done (L09) and not started (L08) are left out; L07 is not waiting on anyone and has no date.
+    expect(cardTitles()).not.toContain(LIFE.L07);
+    expect(
+      screen.getByText(
+        /^1 more task that is not done is not on this screen: not waiting on anyone, and no recorded date in the next 7 days\.$/,
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'See all tasks' }));
+    expect(screen.getByRole('radio', { name: 'All tasks' })).toBeChecked();
+    expect(cardTitles()).toContain(LIFE.L07);
+    expect(screen.getByRole('checkbox', { name: /^Done/ })).toBeInTheDocument();
+  });
+
+  it('keeps each card short: next step, area and date up front, the rest behind Show details', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const boiler = card(LIFE.L01);
+    expect(boiler).toHaveTextContent('Next step: Ring the engineer for a slot');
+    expect(within(boiler).getByText('Home').className).toContain('badge--area');
+    expect(within(boiler).getByText('Waiting on you')).toBeInTheDocument();
+    // No date is recorded, so the short card has no date line; notes and the rest are behind the toggle.
+    expect(within(boiler).queryByText('Recorded date')).not.toBeInTheDocument();
+    expect(within(boiler).queryByText('Last update')).not.toBeInTheDocument();
+    expect(within(boiler).queryByRole('button', { name: /notes/i })).not.toBeInTheDocument();
+    expect(within(boiler).queryByText('Origin missing')).not.toBeInTheDocument();
+
+    const toggle = within(boiler).getByRole('button', { name: `Show details for ${LIFE.L01}` });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).not.toBeVisible();
+    await user.click(toggle);
+    const hide = within(boiler).getByRole('button', { name: `Hide details for ${LIFE.L01}` });
+    expect(hide).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById(hide.getAttribute('aria-controls') ?? '')).toBeVisible();
+    expect(line(boiler, 'Recorded date')).toHaveTextContent('No recorded date');
+    expect(line(boiler, 'Last update')).toHaveTextContent('20 Oct 2026, 09:00 GMT+5:30');
+    expect(line(boiler, 'Money at stake')).toHaveTextContent('Not recorded');
+    expect(within(boiler).getByText('Origin missing')).toBeInTheDocument();
+    await user.click(within(boiler).getByRole('button', { name: `Show notes for ${LIFE.L01}` }));
+    expect(within(boiler).getByText('The engineer prefers mornings.')).toBeVisible();
+
+    await user.click(hide);
+    expect(within(boiler).queryByText('Last update')).not.toBeInTheDocument();
+    // Opening one card leaves the others closed.
+    expect(screen.getAllByRole('button', { name: /^Show details for/ })).toHaveLength(8);
+  });
+
+  it('shows a recorded date on the short card, and the last update where a task is waiting on someone', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const form = card(LIFE.L02);
+    expect(line(form, 'Recorded date')).toHaveTextContent('Fri, 23 Oct 2026 In 2 days Verified');
+    expect(within(form).queryByText('Last update')).not.toBeInTheDocument();
+    const cleaning = card(LIFE.L03);
+    expect(line(cleaning, 'Recorded date')).toHaveTextContent('Thu, 22 Oct 2026 Tomorrow Planning date');
+    // Chase cards say how long it has been.
+    const latch = card(LIFE.L05);
+    expect(line(latch, 'Last update')).toHaveTextContent('(41 days ago)');
+    expect(within(latch).queryByText('Recorded date')).not.toBeInTheDocument();
+    expect(line(card(LIFE.L06), 'Recorded date')).toHaveTextContent('Sun, 15 Nov 2026 Not verified');
+  });
+
+  it('narrows to the search and flags a match that is behind Show details', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    await user.type(screen.getByRole('searchbox'), 'mornings');
+    expect(cardTitles()).toEqual([LIFE.L01]);
+    expect(screen.getByText('Showing 1 of 11 tasks')).toBeInTheDocument();
+    // The other two groups are empty because of the search, and say so.
+    expect(screen.getAllByText('No task here matches the search or area.')).toHaveLength(2);
+    expect(screen.queryByText(/more task/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: `Show details for ${LIFE.L01} (matches your search)` }));
+    // Open, the hint moves to where the word is: the notes.
+    expect(screen.getByRole('button', { name: `Hide details for ${LIFE.L01}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Show notes for ${LIFE.L01} (matches your search)` })).toBeInTheDocument();
+
+    // A word that is on the short card needs no hint.
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'railcard');
+    expect(cardTitles()).toEqual([LIFE.L04]);
+    expect(screen.queryByText('matches your search')).not.toBeInTheDocument();
+  });
+
+  it('says so when nothing matches, and when the only match has not started yet', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    await user.type(screen.getByRole('searchbox'), 'zebra');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText('Try a different word or another area.')).toBeInTheDocument();
+    expect(screen.getByText('Showing 0 of 11 tasks')).toBeInTheDocument();
+
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'allotment');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText('1 matching task has not started yet: tick “Not started yet” to see it.')).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole('main')).getAllByRole('button', { name: 'Reset filters' })[0] as HTMLElement);
+    expect(screen.getByRole('searchbox')).toHaveValue('');
+    expect(cardTitles()).toHaveLength(8);
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+  });
+
+  it('works on a sheet with none of the optional columns', async () => {
+    const { user } = setup();
+    await connectOnly(user);
+    expect(group(/^Your move/)).toEqual(['Order new passport photos', 'Book dentist check-up']);
+    expect(group(/^Next 7 days/)).toEqual([]);
+    expect(screen.getByText('No other recorded dates in the next 7 days.')).toBeInTheDocument();
+    expect(group(/^Chase/)).toEqual(['Plumber quote for kitchen tap']);
+    expect(screen.getByText('Showing 3 of 6 tasks')).toBeInTheDocument();
+    expect(screen.getByText(/^2 more tasks that are not done are not on this screen/)).toBeInTheDocument();
+    // No lines, badges or controls for columns the sheet does not have.
+    expect(document.querySelector('.next-step')).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Area' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /not started/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /calendar/i })).not.toBeInTheDocument();
+  });
+
+  it('says when a group is empty, and keeps the count of past dates in view', async () => {
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Past and verified', 'open', '2026-10-19', '', '', 'verified'],
+      ['T2', 'No date at all', 'open', '', '', '', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument();
+    expect(screen.getByText('No other recorded dates in the next 7 days.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing else is waiting on someone else.')).toBeInTheDocument();
+    expect(cardTitles()).toEqual([]);
+    // A date that has passed is not in "Next 7 days", but it is still counted, in amber, with a way to see it.
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    expect(screen.getByText(/^2 more tasks that are not done are not on this screen/)).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
+    await user.click(screen.getByRole('button', { name: 'See by date' }));
+    expect(screen.getByRole('region', { name: /^Recorded date passed/ })).toHaveTextContent('Past and verified');
+  });
+
+  it('orders Your move by financial priority, and an open card says why', async () => {
+    const values = [
+      [...HEADER, 'Delay-cost basis', 'Date verified'],
+      ['T1', 'No basis', 'waiting on you', '', '', '', '', ''],
+      ['T2', 'Opportunity, verified, in 2 days', 'waiting on you', '2026-10-23', '', '', 'opportunity', 'verified'],
+      ['T3', 'Charge, verified, 2 days back', 'waiting on you', '2026-10-19', '', '', 'avoidable charge', 'verified'],
+      ['T4', 'Someone else, no date', 'waiting on someone else', '', '', '', 'avoidable charge', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByText('Waiting on you, in Financial priority order.')).toBeInTheDocument();
+    expect(group(/^Your move/)).toEqual(['Charge, verified, 2 days back', 'Opportunity, verified, in 2 days', 'No basis']);
+
+    // Closed, a card has no "why" line; a verified date that has passed says so on the date itself.
+    const passed = 'The date has passed; the dashboard does not know whether a consequence applies now.';
+    const charge = card('Charge, verified, 2 days back');
+    expect(screen.queryByText(/Why this order/)).not.toBeInTheDocument();
+    expect(line(charge, 'Recorded date')).toHaveTextContent(passed);
+
+    // Open, the "why" line says it instead: once on the card, not twice.
+    await user.click(within(charge).getByRole('button', { name: /^Show details for/ }));
+    expect(why(charge)).toBe(`Avoidable charge, recorded date 2 days ago (verified). ${passed}`);
+    expect((charge.textContent ?? '').split(passed)).toHaveLength(2);
+    const moved = card('Opportunity, verified, in 2 days');
+    await user.click(within(moved).getByRole('button', { name: /^Show details for/ }));
+    expect(why(moved)).toBe(
+      'Opportunity, recorded date in 2 days (verified). Moved up by the fixed 7-day rule: its verified date is within 7 days.',
+    );
+
+    // The other groups are not in Financial priority order, so their cards never carry the line.
+    const chase = card('Someone else, no date');
+    await user.click(within(chase).getByRole('button', { name: /^Show details for/ }));
+    expect(chase.querySelector('.why-order')).toBeNull();
+    expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
+  });
+
+  it('gives tasks it cannot place a group of their own, and never describes them as not waiting on anyone', async () => {
+    const values = [
+      HEADER,
+      ['T1', 'Open with no date', 'open', '', '', ''],
+      ['T2', 'Status is not one of the four', 'waiting on me', '', '', ''],
+      ['T3', 'Status is blank', '', '', '', ''],
+      ['T4', 'Date is not readable', 'open', '25/10/2026', '', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByRole('heading', { level: 2, name: 'Can’t be placed 3' })).toBeInTheDocument();
+    expect(group(/^Can’t be placed/)).toEqual(['Status is not one of the four', 'Status is blank', 'Date is not readable']);
+    expect(screen.getByText(/^The Status or the Deadline cell of these tasks cannot be read/)).toBeInTheDocument();
+    // Each card shows what is wrong with it.
+    expect(within(card('Status is not one of the four')).getByText('Unknown status: waiting on me')).toBeInTheDocument();
+    expect(within(card('Status is blank')).getByText('No status')).toBeInTheDocument();
+    expect(line(card('Date is not readable'), 'Recorded date')).toHaveTextContent('“25/10/2026” Not a YYYY-MM-DD date');
+    // Only the task that can be read is counted as "not waiting on anyone, no recorded date in the next 7 days".
+    expect(screen.getByText(/^1 more task that is not done is not on this screen: not waiting on anyone/)).toBeInTheDocument();
+    expect(screen.getByText('Showing 3 of 4 tasks')).toBeInTheDocument();
+
+    // Review flags the same cells.
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    const flagged = (title: string) => within(card(title)).getByRole('list', { name: 'Flagged for' });
+    expect(flagged('Status is not one of the four')).toHaveTextContent('No valid status');
+    expect(flagged('Date is not readable')).toHaveTextContent('Date not readable');
+    const checks = Array.from(document.querySelectorAll('.review-checks li')).map((li) => li.textContent);
+    expect(checks.slice(0, 2)).toEqual(['No valid status: 2', 'Date not readable: 1']);
+  });
+
+  it('has no group for unreadable tasks while every task can be read', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(screen.queryByRole('heading', { name: /^Can’t be placed/ })).not.toBeInTheDocument();
+  });
+
+  it('counts the done tasks it leaves out, so the numbers add up', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    // 11 tasks: 8 on screen, 1 not waiting on anyone, 1 done, and 1 not started (counted on its chip).
+    expect(screen.getByText('Showing 8 of 11 tasks')).toBeInTheDocument();
+    expect(screen.getByText(/^1 more task that is not done is not on this screen/)).toBeInTheDocument();
+    expect(screen.getByText('1 done task is left out.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' })).not.toBeChecked();
+  });
+
+  it('says a match is done instead of "no match", in Today and in Review', async () => {
+    const values = lifeValues();
+    values.push(['L12', 'Shred the old statements', 'done', '', '2026-10-20T09:00:00+05:30', '', '', '', '', '', '', '', '', '', 'Archive', '', '']);
+    const { user } = setupLife(values);
+    await connectOnly(user);
+    const done = '1 matching task is done, and this view lists only tasks that are not done. All tasks shows it when Done is ticked.';
+    await user.type(screen.getByRole('searchbox'), 'library books');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText(done)).toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(screen.getByText(done)).toBeInTheDocument();
+
+    // An area whose tasks are all done: no word was typed, so none is asked for.
+    await user.clear(screen.getByRole('searchbox'));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Area' }), 'Archive (0 not done)');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText(done)).toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'All tasks' }));
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toEqual(['Shred the old statements']);
+  });
+
+  it('opens the full list with its usual statuses from "See all tasks"', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    expect(cardTitles()).not.toContain(LIFE.L07);
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    await user.click(screen.getByRole('button', { name: 'See all tasks' }));
+    // The note promised the task that is "not on this screen": the list has to show it.
+    expect(screen.getByRole('checkbox', { name: /^Open/ })).toBeChecked();
+    expect(cardTitles()).toContain(LIFE.L07);
+  });
+
+  it('keeps everything "Show details" reveals inside the part the toggle controls', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const form = card(LIFE.L02);
+    const toggle = within(form).getByRole('button', { name: `Show details for ${LIFE.L02}` });
+    const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '') as HTMLElement;
+    const upFront = form.textContent;
+    await user.click(toggle);
+    // What opening added: the calendar link, the origin, the last update, the lines, the notes.
+    expect(within(body).getByRole('link', { name: /^Add to calendar: / })).toBeInTheDocument();
+    expect(within(body).getByText('Origin missing')).toBeInTheDocument();
+    expect(within(body).getByText('Last update')).toBeInTheDocument();
+    // Nothing outside that part changed, apart from the toggle's own arrow and label.
+    body.remove();
+    expect(form.textContent).toBe((upFront ?? '').replace('▸Show details', '▾Hide details'));
+  });
+
+  it('does not flag a match that is already on the card because its full text was opened', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    const latch = card(LIFE.L05);
+    await user.click(within(latch).getByRole('button', { name: `Show details for ${LIFE.L05}` }));
+    await user.click(within(latch).getByRole('button', { name: `Show full text for ${LIFE.L05}` }));
+    await user.click(within(latch).getByRole('button', { name: `Hide details for ${LIFE.L05}` }));
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/fit a temporary catch\.$/);
+    await user.type(screen.getByRole('searchbox'), 'screwdriver');
+    expect(cardTitles()).toEqual([LIFE.L05]);
+    expect(screen.queryByText('matches your search')).not.toBeInTheDocument();
+  });
+
+  it('lays the three groups out as cards on a wide screen too', async () => {
+    setWideScreen(true);
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(group(/^Your move/)).toEqual([LIFE.L02, LIFE.L01]);
+    await user.click(screen.getByRole('radio', { name: 'All tasks' }));
+    expect(screen.getByRole('table', { name: 'Tasks by financial priority' })).toBeInTheDocument();
+  });
+});
+
+describe('next step', () => {
+  it('is the first line under the task name in every list view', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    const boiler = card(LIFE.L01);
+    const nextStep = boiler.querySelector('.next-step');
+    expect(nextStep).toHaveTextContent(/^Next step: Ring the engineer for a slot$/);
+    expect(within(boiler).getByRole('heading', { level: 3 }).nextElementSibling).toBe(nextStep);
+    // A blank cell is said, not hidden.
+    expect(card(LIFE.L04).querySelector('.next-step')).toHaveTextContent(/^Next step: Not recorded$/);
+
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(card(LIFE.L01).querySelector('.next-step')).toHaveTextContent('Ring the engineer for a slot');
+  });
+
+  it('folds a long one behind Show full text, with the other long text of the task', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    const latch = card(LIFE.L05);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/with the photos of the latch,…$/);
+    const toggle = within(latch).getByRole('button', { name: `Show full text for ${LIFE.L05}` });
+    // The toggle names the parts it opens: the next step and the labelled lines.
+    const controlled = (toggle.getAttribute('aria-controls') ?? '').split(' ').map((id) => document.getElementById(id));
+    expect(controlled).toHaveLength(2);
+    expect(controlled[0]).toBe(latch.querySelector('.next-step'));
+    expect(controlled[1]).toBe(latch.querySelector('.task-details .task-meta'));
+    await user.click(toggle);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/fit a temporary catch\.$/);
+    expect(screen.queryAllByRole('button', { name: /^Show full text for/ })).toHaveLength(0);
+    expect(within(latch).getByRole('button', { name: `Show less text for ${LIFE.L05}` })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('is found by search, and a match in the folded part is flagged', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.type(screen.getByRole('searchbox'), 'engineer');
+    expect(cardTitles()).toEqual([LIFE.L01]);
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'screwdriver');
+    expect(cardTitles()).toEqual([LIFE.L05]);
+    expect(screen.getByRole('button', { name: `Show full text for ${LIFE.L05} (matches your search)` })).toBeInTheDocument();
+
+    // On a short card the folded part is behind Show details.
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    expect(screen.getByRole('button', { name: `Show details for ${LIFE.L05} (matches your search)` })).toBeInTheDocument();
+  });
+
+  it('is shown as written: no HTML, and only https links', async () => {
+    const values = [
+      [...HEADER, 'Next step'],
+      ['T1', 'Odd text', 'open', '', '', '', '<img src=x onerror=alert(1)> see https://example.org/step or javascript:alert(1)'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    const odd = card('Odd text');
+    expect(odd.querySelector('img')).toBeNull();
+    expect(odd.querySelector('.next-step')).toHaveTextContent('<img src=x onerror=alert(1)> see https://example.org/step or javascript:alert(1)');
+    expect(within(odd).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['https://example.org/step']);
+  });
+
+  it('sits at the top of the last table column on a wide screen, not in the row header', async () => {
+    setWideScreen(true);
+    const { user } = setupLife();
+    await connect(user);
+    const table = screen.getByRole('table', { name: 'Tasks by financial priority' });
+    expect(within(table).getAllByRole('columnheader').at(-1)).toHaveTextContent('Progress and notes');
+    const row = within(table).getByRole('rowheader', { name: /Book the boiler service/ }).closest('tr') as HTMLElement;
+    expect(within(row).getByRole('rowheader')).toHaveTextContent(/^Book the boiler service Home Origin missing$/);
+    expect(row.querySelector('td:last-child')).toHaveTextContent(/^Next step: Ring the engineer for a slotWhy this order:/);
+
+    // The long next step folds in the table too, and its toggle names the two parts it opens.
+    const latch = within(table).getByRole('rowheader', { name: /Landlord to fix the gate latch/ }).closest('tr') as HTMLElement;
+    const toggle = within(latch).getByRole('button', { name: `Show full text for ${LIFE.L05}` });
+    const controlled = (toggle.getAttribute('aria-controls') ?? '').split(' ').map((id) => document.getElementById(id));
+    expect(controlled).toEqual([latch.querySelector('.next-step'), latch.querySelector('.task-details .task-meta')]);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/with the photos of the latch,…$/);
+    await user.click(toggle);
+    expect(latch.querySelector('.next-step')).toHaveTextContent(/fit a temporary catch\.$/);
+    // A Start date sits under the recorded date in the table.
+    const tyres = within(table).getByRole('rowheader', { name: /Swap the winter tyres/ }).closest('tr') as HTMLElement;
+    expect(tyres.querySelector('.start-line')).toHaveTextContent(/^Start Thu, 15 Oct 2026$/);
+  });
+
+  it('adds the table column for a sheet that has Next step and none of the other new columns', async () => {
+    setWideScreen(true);
+    const values = [[...HEADER, 'Next step'], ['T1', 'One column', 'open', '', '', '', 'Ring them']];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(screen.getAllByRole('columnheader').at(-1)).toHaveTextContent('Progress and notes');
+    expect(screen.getByRole('table')).toHaveTextContent('Next step: Ring them');
+  });
+});
+
+describe('areas', () => {
+  const picker = () => screen.getByRole('combobox', { name: 'Area' });
+
+  it('offers each area once with how many of its tasks are not done', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(within(picker()).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'All areas',
+      // "car" and "Car" are one area.
+      'car (2 not done)',
+      'Family (1 not done)',
+      'Garden (1 not done)',
+      'Home (4 not done)',
+      'Travel (1 not done)',
+      'No area (1 not done)',
+    ]);
+    expect(picker()).toHaveValue('ALL');
+  });
+
+  it('narrows every view to one area, and the chip counts with it', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    await user.selectOptions(picker(), 'Home (4 not done)');
+    expect(group(/^Your move/)).toEqual([LIFE.L01]);
+    expect(group(/^Next 7 days/)).toEqual([LIFE.L03, LIFE.L11]);
+    expect(group(/^Chase/)).toEqual([LIFE.L05]);
+    expect(screen.getByText('Showing 4 of 11 tasks')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'All tasks' }));
+    expect(cardTitles().sort()).toEqual([LIFE.L01, LIFE.L03, LIFE.L05, LIFE.L11].sort());
+    expect(screen.getByRole('checkbox', { name: 'Open, 1 task' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Waiting on you, 1 task' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Waiting on someone else, 2 tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Done, 1 task' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(cardTitles().sort()).toEqual([LIFE.L01, LIFE.L03, LIFE.L05, LIFE.L11].sort());
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(cardTitles()).toEqual([LIFE.L05]);
+
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(picker()).toHaveValue('ALL');
+    expect(cardTitles()).toEqual([LIFE.L05, LIFE.L10, LIFE.L04, LIFE.L07]);
+  });
+
+  it('treats the same area in another letter case as one, and can show the tasks with no area', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.selectOptions(picker(), 'car (2 not done)');
+    expect(cardTitles().sort()).toEqual([LIFE.L06, LIFE.L10].sort());
+    // Each task keeps its own spelling on its badge.
+    expect(within(card(LIFE.L06)).getByText('car').className).toContain('badge--area');
+    expect(within(card(LIFE.L10)).getByText('Car').className).toContain('badge--area');
+
+    await user.selectOptions(picker(), 'No area (1 not done)');
+    expect(cardTitles()).toEqual([LIFE.L07]);
+    expect(card(LIFE.L07).querySelector('.badge--area')).toBeNull();
+  });
+
+  it('combines with the search, and counts the past dates of the chosen area only', async () => {
+    const values = lifeValues();
+    values.push(['L12', 'Post the warranty slip', 'open', '2026-10-19', '', '', '', '', '', '', '', '', '', '', 'Travel', '', 'Find a stamp']);
+    const { user } = setupLife(values);
+    await connect(user);
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    await user.selectOptions(picker(), 'Home (4 not done)');
+    expect(screen.queryByText(/recorded date in the past/)).not.toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox'), 'deposit');
+    expect(cardTitles()).toEqual([LIFE.L11]);
+    await user.clear(screen.getByRole('searchbox'));
+    await user.type(screen.getByRole('searchbox'), 'railcard');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+  });
+
+  it('drops an area for good when the sheet no longer has it', async () => {
+    const renamed = lifeValues().map((row) => row.map((cell, index) => (index === 14 && cell === 'Travel' ? 'Trips' : cell)));
+    const { user } = setup({
+      fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(renamed), valuesResponse(lifeValues())),
+    });
+    await connect(user);
+    await user.selectOptions(picker(), 'Travel (1 not done)');
+    expect(cardTitles()).toEqual([LIFE.L04]);
+
+    // The area was renamed in the sheet: the filter is off, and nothing is left to reset.
+    await refresh(user);
+    expect(picker()).toHaveValue('ALL');
+    expect(screen.getByText('Showing 9 of 11 tasks')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+
+    // When the old name comes back, the view does not narrow by itself.
+    await refresh(user);
+    expect(picker()).toHaveValue('ALL');
+    expect(screen.getByText('Showing 9 of 11 tasks')).toBeInTheDocument();
+  });
+
+  it('drops "No area" when the sheet loses its Area column', async () => {
+    const withoutArea = lifeValues().map((row) => row.filter((_, index) => index !== 14));
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(withoutArea)) });
+    await connectOnly(user);
+    await user.selectOptions(picker(), 'No area (1 not done)');
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
+
+    await refresh(user);
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No task here matches the search or area.')).not.toBeInTheDocument();
+    expect(cardTitles()).toHaveLength(8);
+  });
+
+  it('has no picker and no badge while the sheet has no Area column', async () => {
+    const { user } = setupPlanning();
+    await connect(user);
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(document.querySelector('.badge--area')).toBeNull();
+  });
+});
+
+describe('start dates', () => {
+  const toggle = () => screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' });
+
+  it('leaves out a task that cannot start yet, with a visible count, until asked', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    expect(cardTitles()).not.toContain(LIFE.L08);
+    expect(toggle()).not.toBeChecked();
+    expect(screen.getByText('Showing 9 of 11 tasks')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Open, 4 tasks' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+
+    await user.click(toggle());
+    expect(cardTitles()).toContain(LIFE.L08);
+    expect(screen.getByText('Showing 10 of 11 tasks')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Open, 5 tasks' })).toBeInTheDocument();
+    const beds = card(LIFE.L08);
+    expect(line(beds, 'Start')).toHaveTextContent('Tue, 10 Nov 2026 Not started yet');
+
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(toggle()).not.toBeChecked();
+    expect(cardTitles()).not.toContain(LIFE.L08);
+  });
+
+  it('shows a Start that has passed as a plain date, and no Start line for a blank cell', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    const tyres = card(LIFE.L10);
+    expect(line(tyres, 'Start')).toHaveTextContent(/^StartThu, 15 Oct 2026$/);
+    expect(within(card(LIFE.L01)).queryByText('Start', { selector: 'dt' })).not.toBeInTheDocument();
+  });
+
+  it('applies to Today, By date and Review as well', async () => {
+    const { user } = setupLife();
+    await connectOnly(user);
+    expect(cardTitles()).not.toContain(LIFE.L08);
+    await user.click(toggle());
+    // It is open with no date, so on Today it joins the tasks left to the other views.
+    expect(screen.getByText(/^2 more tasks that are not done are not on this screen/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'By date' }));
+    expect(cardTitles()).toContain(LIFE.L08);
+    await user.click(toggle());
+    expect(cardTitles()).not.toContain(LIFE.L08);
+  });
+
+  it('says when a search only matches a task that has not started yet', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.type(screen.getByRole('searchbox'), 'allotment');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    expect(screen.getByText('1 matching task has not started yet: tick “Not started yet” to see it.')).toBeInTheDocument();
+    await user.click(toggle());
+    expect(cardTitles()).toEqual([LIFE.L08]);
+  });
+
+  it('says so when a match is hidden by both an unticked status and its Start date', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    await user.type(screen.getByRole('searchbox'), 'allotment');
+    expect(screen.getByRole('heading', { name: 'No tasks match' })).toBeInTheDocument();
+    // First the status: ticking "Not started yet" alone would not bring it back.
+    expect(screen.getByText(/^1 task matches with a status that is hidden right now/)).toBeInTheDocument();
+    expect(screen.queryByText(/not started yet: tick/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Try a different word/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /^Open/ }));
+    expect(screen.getByText('1 matching task has not started yet: tick “Not started yet” to see it.')).toBeInTheDocument();
+  });
+
+  it('marks a task that has not started on its short card, and lists it in Review only when asked', async () => {
+    const values = lifeValues();
+    // Waiting on you, cannot start yet, and has no next step (a Review flag).
+    values.push(['L12', 'Renew the allotment lease', 'waiting on you', '', '2026-10-20T09:00:00+05:30', '', '', '', '', '', '', '', '', '', 'Garden', '2026-12-01', '']);
+    const { user } = setupLife(values);
+    await connectOnly(user);
+    const toggle = () => screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 2 tasks' });
+    expect(cardTitles()).not.toContain('Renew the allotment lease');
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(cardTitles()).not.toContain('Renew the allotment lease');
+
+    await user.click(toggle());
+    expect(cardTitles()).toContain('Renew the allotment lease');
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    expect(group(/^Your move/)).toContain('Renew the allotment lease');
+    // Closed, the card already says the task cannot be started yet.
+    const lease = card('Renew the allotment lease');
+    expect(within(lease).getByRole('button', { name: /^Show details for/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(line(lease, 'Start')).toHaveTextContent('Tue, 1 Dec 2026 Not started yet');
+    // A task that has started keeps its Start line behind Show details.
+    const tyres = card(LIFE.L10);
+    expect(within(tyres).queryByText('Start', { selector: 'dt' })).not.toBeInTheDocument();
+    await user.click(within(tyres).getByRole('button', { name: /^Show details for/ }));
+    expect(line(tyres, 'Start')).toHaveTextContent(/^StartThu, 15 Oct 2026$/);
+  });
+
+  it('switches the toggle off for good once no task is waiting to start', async () => {
+    const started = lifeValues().map((row) => (row[0] === 'L08' ? row.map((cell, index) => (index === 15 ? '2026-10-01' : cell)) : row));
+    const { user } = setup({
+      fetchImpl: scriptedFetch(valuesResponse(lifeValues()), valuesResponse(started), valuesResponse(lifeValues())),
+    });
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' }));
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
+
+    // After a refresh the task has started: the chip goes, and so does a Reset that would have nothing to reset.
+    await refresh(user);
+    expect(screen.queryByRole('checkbox', { name: /not started/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+    expect(cardTitles()).toContain(LIFE.L08);
+
+    // If a task is waiting to start again later, the toggle is back unticked, not silently on.
+    await refresh(user);
+    expect(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' })).not.toBeChecked();
+    expect(cardTitles()).not.toContain(LIFE.L08);
+  });
+
+  it('never hides a done task, and treats a Start that is not a date as started, with the problem listed', async () => {
+    const values = [
+      [...HEADER, 'Start'],
+      ['T1', 'Finished early', 'done', '', '', '', '2027-01-01'],
+      ['T2', 'Start is not a date', 'open', '', '', '', 'next spring'],
+      ['T3', 'Starts today', 'open', '', '', '', '2026-10-21'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(screen.queryByRole('checkbox', { name: /not started/i })).not.toBeInTheDocument();
+    expect(cardTitles()).toEqual(['Start is not a date', 'Starts today']);
+    expect(line(card('Start is not a date'), 'Start')).toHaveTextContent('“next spring” Not a YYYY-MM-DD date');
+    expect(line(card('Starts today'), 'Start')).toHaveTextContent(/^StartWed, 21 Oct 2026$/);
+    await user.click(screen.getByText('1 problem found in the sheet'));
+    expect(
+      screen.getByText('Row 3 (T2): start “next spring” is not a date written as YYYY-MM-DD. The task is treated as started.'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(cardTitles()).toContain('Finished early');
+    expect(within(card('Finished early')).queryByText('Not started yet')).not.toBeInTheDocument();
+  });
+
+  it('starts a task on its Start date: after midnight it is back without a refresh', async () => {
+    const values = [[...HEADER, 'Start'], ['T1', 'Starts tomorrow', 'open', '', '', '', '2026-10-22']];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    expect(cardTitles()).toEqual([]);
+    expect(screen.getByRole('checkbox', { name: 'Show tasks that have not started yet, 1 task' })).toBeInTheDocument();
+    // 09:30 in India now; 15 hours later it is 22 Oct there.
+    await settle(15 * 60 * 60 * 1000);
+    expect(cardTitles()).toEqual(['Starts tomorrow']);
+    expect(screen.queryByRole('checkbox', { name: /not started/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('review view', () => {
+  const openReview = async (user: ReturnType<typeof userEvent.setup>) => {
+    await connectOnly(user);
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+  };
+  const flags = (title: string) =>
+    within(within(card(title)).getByRole('list', { name: 'Flagged for' }))
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+
+  it('lists the tasks that have gone quiet or are missing something, and says why', async () => {
+    const { user } = setupLife();
+    await openReview(user);
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs a look 4' })).toBeInTheDocument();
+    expect(cardTitles()).toEqual([LIFE.L05, LIFE.L10, LIFE.L04, LIFE.L07]);
+    expect(flags(LIFE.L05)).toEqual(['No update for 41 days', 'Waiting on someone else, no date']);
+    expect(flags(LIFE.L10)).toEqual(['No last update recorded']);
+    expect(flags(LIFE.L04)).toEqual(['No next step']);
+    expect(flags(LIFE.L07)).toEqual(['No area']);
+    expect(screen.getByText('Showing 4 of 11 tasks')).toBeInTheDocument();
+  });
+
+  it('counts what each check found', async () => {
+    const { user } = setupLife();
+    await openReview(user);
+    const checks = Array.from(document.querySelectorAll('.review-checks li')).map((li) => li.textContent);
+    expect(checks).toEqual([
+      'No update for 30 days or more: 1',
+      'No last update recorded: 1',
+      'Waiting on someone else with no recorded date: 1',
+      'No next step: 1',
+      'No area: 1',
+    ]);
+  });
+
+  it('has no status chips or sort order, and uses short cards', async () => {
+    const { user } = setupLife();
+    await openReview(user);
+    expect(screen.queryByRole('checkbox', { name: /^Done/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Financial priority' })).not.toBeInTheDocument();
+    const latch = card(LIFE.L05);
+    expect(line(latch, 'Last update')).toHaveTextContent('(41 days ago)');
+    await user.click(within(latch).getByRole('button', { name: `Show details for ${LIFE.L05}` }));
+    expect(line(latch, 'Recorded date')).toHaveTextContent('No recorded date');
+  });
+
+  it('never lists a done task, and follows the search', async () => {
+    const values = lifeValues();
+    // Done, with no area, no next step and no update: every flag would apply if done tasks were checked.
+    values.push(['L12', 'Shred the old statements', 'done', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    const { user } = setupLife(values);
+    await openReview(user);
+    expect(cardTitles()).toEqual([LIFE.L05, LIFE.L10, LIFE.L04, LIFE.L07]);
+    await user.type(screen.getByRole('searchbox'), 'tyres');
+    expect(cardTitles()).toEqual([LIFE.L10]);
+    expect(screen.getByText('Showing 1 of 12 tasks')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Needs a look 1' })).toBeInTheDocument();
+  });
+
+  it('leaves the count of past dates to the other views', async () => {
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Past and quiet', 'open', '2026-10-01', '', '', 'verified'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connectOnly(user);
+    expect(screen.getByText('1 task has a recorded date in the past')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Review' }));
+    expect(screen.queryByText(/recorded date in the past/)).not.toBeInTheDocument();
+    // The task itself still says its verified date has passed.
+    expect(card('Past and quiet')).toHaveTextContent('The date has passed; the dashboard does not know whether a consequence applies now.');
+  });
+
+  it('skips the checks for columns the sheet does not have, and says so', async () => {
+    const { user } = setup();
+    await openReview(user);
+    expect(Array.from(document.querySelectorAll('.review-checks li')).map((li) => li.textContent)).toEqual([
+      'No update for 30 days or more: 0',
+      'No last update recorded: 0',
+      'Waiting on someone else with no recorded date: 0',
+    ]);
+    expect(screen.getByText('The Tasks tab has no “Next step” column yet, so next steps are not checked.')).toBeInTheDocument();
+    expect(screen.getByText('The Tasks tab has no “Area” column yet, so areas are not checked.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing needs a look.')).toBeInTheDocument();
+    expect(screen.getByText('Showing 0 of 6 tasks')).toBeInTheDocument();
+  });
+
+  it('counts the days without an update on the viewer’s calendar', async () => {
+    const values = [
+      HEADER,
+      // 20:00 UTC on 20 Sep is 21 Sep in India: 30 days before 21 Oct there.
+      ['T1', 'Quiet for a month', 'open', '', '2026-09-20T20:00:00Z', ''],
+      ['T2', 'Quiet for 29 days', 'open', '', '2026-09-21T20:00:00Z', ''],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await openReview(user);
+    expect(cardTitles()).toEqual(['Quiet for a month']);
+    expect(flags('Quiet for a month')).toEqual(['No update for 30 days']);
+  });
+
+  it('words nothing as due, overdue or missed', async () => {
+    const { user } = setupLife();
+    await openReview(user);
+    expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
+    await user.click(screen.getByRole('radio', { name: 'Today' }));
+    expect(document.body.textContent ?? '').not.toMatch(/overdue|\bdue\b|enforced|missed|too late/i);
+  });
+});
+
+describe('add to calendar', () => {
+  it('offers a Google Calendar link only for a verified date that is today or later', async () => {
+    const { user } = setupLife();
+    await connect(user);
+    const links = screen.getAllByRole('link', { name: /^Add to calendar: / });
+    expect(links.map((a) => a.getAttribute('aria-label'))).toEqual([
+      `Add to calendar: ${LIFE.L02} (opens Google Calendar in a new tab)`,
+      `Add to calendar: ${LIFE.L04} (opens Google Calendar in a new tab)`,
+    ]);
+    const link = within(card(LIFE.L02)).getByRole('link', { name: /^Add to calendar: / });
+    expect(link).toHaveTextContent('Add to calendar');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    const url = new URL(link.getAttribute('href') ?? '');
+    expect(url.origin + url.pathname).toBe('https://calendar.google.com/calendar/render');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      action: 'TEMPLATE',
+      text: LIFE.L02,
+      dates: '20261023/20261024',
+      details: 'Task L02 in the task tracker.',
+    });
+  });
+
+  it('does not offer it for a planning date, a passed date or a done task', async () => {
+    const values = [
+      [...HEADER, 'Date verified'],
+      ['T1', 'Planning date ahead', 'open', '2026-10-25', '', '', 'planning'],
+      ['T2', 'Verified but passed', 'open', '2026-10-19', '', '', 'verified'],
+      ['T3', 'Verified but done', 'done', '2026-10-25', '', '', 'verified'],
+      ['T4', 'Verified and today', 'open', '2026-10-21', '', '', 'verified'],
+    ];
+    const { user } = setup({ fetchImpl: scriptedFetch(valuesResponse(values)) });
+    await connect(user);
+    await user.click(screen.getByRole('checkbox', { name: /^Done/ }));
+    expect(screen.getAllByRole('link', { name: /^Add to calendar: / }).map((a) => a.getAttribute('aria-label'))).toEqual([
+      'Add to calendar: Verified and today (opens Google Calendar in a new tab)',
+    ]);
+  });
+
+  it('keeps the link behind Show details on a short card, and shows it in the table', async () => {
+    const { user, unmount } = setupLife();
+    await connectOnly(user);
+    expect(screen.queryByRole('link', { name: /^Add to calendar: / })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: `Show details for ${LIFE.L02}` }));
+    expect(within(card(LIFE.L02)).getByRole('link', { name: /^Add to calendar: / })).toBeInTheDocument();
+    unmount();
+
+    setWideScreen(true);
+    const wide = setupLife();
+    await connect(wide.user);
+    expect(within(screen.getByRole('table')).getAllByRole('link', { name: /^Add to calendar: / })).toHaveLength(2);
+  });
+
+  it('never calls Google Calendar itself: the only request is the read of the sheet', async () => {
+    const { user, fetchImpl } = setupLife();
+    await connect(user);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetchImpl).mock.calls[0]?.[0]).toEqual(expect.stringContaining('https://sheets.googleapis.com/'));
+  });
+});
+
 describe('freshness', () => {
   it('refreshes automatically at most every 5 minutes', async () => {
     const { user, fetchImpl } = setup();
@@ -1100,6 +2055,11 @@ describe('keyboard use', () => {
     await user.keyboard('{Enter}');
     await settle();
 
+    // The dashboard opens on Today; the views are the first control, and the arrow keys move between them.
+    await tabTo(user, screen.getByRole('radio', { name: 'Today' }));
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('radio', { name: 'All tasks' })).toBeChecked();
+
     const done = screen.getByRole('checkbox', { name: /^Done/ });
     await tabTo(user, done);
     await user.keyboard(' ');
@@ -1118,14 +2078,13 @@ describe('keyboard use', () => {
 
   it('reaches the views, the sort order and the full-text toggle from the keyboard', async () => {
     const { user } = setupPlanning();
-    await connect(user);
-    await tabTo(user, screen.getByRole('searchbox'));
-    await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'All tasks' }));
-    await user.keyboard('{ArrowRight}{ArrowRight}');
+    await connectOnly(user);
+    await tabTo(user, screen.getByRole('radio', { name: 'Today' }));
+    await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}');
     expect(screen.getByRole('radio', { name: 'You requested' })).toBeChecked();
     expect(cardTitles()).toEqual([PLANNING.P03, PLANNING.P01]);
 
+    await tabTo(user, screen.getByRole('searchbox'));
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Financial priority' }));
     await user.keyboard('{ArrowRight}');

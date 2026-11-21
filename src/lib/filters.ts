@@ -1,6 +1,15 @@
 import { compareCalendarDates, daysBetween, type CalendarDate } from './dates.ts';
 import { clipText } from './preview.ts';
-import { ACTIVE_STATUSES, DETAIL_FIELDS, ORIGINS, STATUSES, type Origin, type Status, type Task } from './tasks.ts';
+import {
+  ACTIVE_STATUSES,
+  areaKey,
+  ORIGINS,
+  STATUSES,
+  TEXT_FIELDS,
+  type Origin,
+  type Status,
+  type Task,
+} from './tasks.ts';
 
 /** A status filter value: one of the four statuses, or "unknown" for rows whose status needs fixing. */
 export type StatusKey = Status | 'unknown';
@@ -25,14 +34,14 @@ function searchTerms(query: string): string[] {
 }
 
 /**
- * Every word of the query must appear in the Task ID, task name, notes, links
- * or one of the free-text lines (any case).
+ * Every word of the query must appear in the Task ID, task name, area, notes,
+ * links, next step or one of the free-text lines (any case).
  */
 export function matchesSearch(task: Task, query: string): boolean {
   const terms = searchTerms(query);
   if (terms.length === 0) return true;
-  const details = DETAIL_FIELDS.map((field) => task[field]).join('\n');
-  const text = `${task.id}\n${task.title}\n${task.notes}\n${task.rawLinks}\n${details}`.toLocaleLowerCase();
+  const details = TEXT_FIELDS.map((field) => task[field]).join('\n');
+  const text = `${task.id}\n${task.title}\n${task.area}\n${task.notes}\n${task.rawLinks}\n${details}`.toLocaleLowerCase();
   return terms.every((term) => text.includes(term));
 }
 
@@ -44,35 +53,121 @@ export function matchesOnlyInNotes(task: Task, query: string): boolean {
 
 /**
  * True when a search word is in free text folded away behind "Show full text"
- * and nowhere in the Task ID, name, links or the visible start of those lines.
+ * and nowhere in the Task ID, name, area, links or the visible start of those lines.
  */
 export function matchesOnlyInFoldedText(task: Task, query: string): boolean {
   if (!matchesSearch(task, query)) return false;
   const lower = (parts: string[]) => parts.join('\n').toLocaleLowerCase();
-  const shown = lower([task.id, task.title, task.rawLinks, ...DETAIL_FIELDS.map((field) => clipText(task[field]).text)]);
-  const whole = lower(DETAIL_FIELDS.map((field) => task[field]));
+  const shown = lower([
+    task.id,
+    task.title,
+    task.area,
+    task.rawLinks,
+    ...TEXT_FIELDS.map((field) => clipText(task[field]).text),
+  ]);
+  const whole = lower(TEXT_FIELDS.map((field) => task[field]));
   return searchTerms(query).some((term) => !shown.includes(term) && whole.includes(term));
 }
 
+/** True when some of the task's free text is long enough to be folded behind "Show full text". */
+export function hasFoldedText(task: Task): boolean {
+  return TEXT_FIELDS.some((field) => clipText(task[field]).clipped);
+}
+
 /**
- * `origin` narrows the list to one origin view ("You requested" or "Inbound").
- * Tasks with a blank or unrecognised Origin are in neither: they stay in the
- * unfiltered list and are counted by countByOrigin.
+ * True when the task matches the search only through what a short card keeps
+ * behind "Show details": its notes, links and labelled lines. The Task ID,
+ * name, area and next step are always on the card: the whole next step when
+ * `fullText` is set (the task's long text was opened), otherwise its visible start.
  */
-export function filterTasks(
-  tasks: readonly Task[],
-  filter: { statuses: ReadonlySet<StatusKey>; query: string; origin?: Origin | null },
-): Task[] {
+export function matchesOnlyBehindDetails(task: Task, query: string, fullText = false): boolean {
+  if (!query.trim() || !matchesSearch(task, query)) return false;
+  const front: Task = {
+    ...task,
+    notes: '',
+    rawLinks: '',
+    progress: '',
+    moneyAtStake: '',
+    effort: '',
+    expectedFinish: '',
+    nextStep: fullText ? task.nextStep : clipText(task.nextStep).text,
+  };
+  return !matchesSearch(front, query);
+}
+
+/**
+ * True while a task's Start date is still ahead: nothing can be done on it yet.
+ * A done task is never "not started", whatever its Start cell says.
+ */
+export function isNotStarted(task: Task, today: CalendarDate): boolean {
+  return task.status !== 'done' && task.start !== null && daysBetween(today, task.start) > 0;
+}
+
+export interface TaskFilter {
+  statuses: ReadonlySet<StatusKey>;
+  query: string;
+  /**
+   * Narrows the list to one origin view ("You requested" or "Inbound"). Tasks
+   * with a blank or unrecognised Origin are in neither: they stay in the
+   * unfiltered list and are counted by countByOrigin.
+   */
+  origin?: Origin | null;
+  /** One area, as an areaKey. "" means the tasks with no area. Leave out for every area. */
+  area?: string | null;
+  /** Leave out tasks whose Start date is after this day. Leave out the field to keep them. */
+  startedBy?: CalendarDate | null;
+}
+
+export function filterTasks(tasks: readonly Task[], filter: TaskFilter): Task[] {
+  const { area, startedBy } = filter;
   return tasks.filter(
     (task) =>
       filter.statuses.has(statusKey(task)) &&
       (!filter.origin || task.origin === filter.origin) &&
+      (area === null || area === undefined || areaKey(task.area) === area) &&
+      (!startedBy || !isNotStarted(task, startedBy)) &&
       matchesSearch(task, filter.query),
   );
 }
 
-/** The list's views. "list" and "deadlines" show every origin; the other two show one origin each. */
-export type View = 'list' | 'deadlines' | 'you-requested' | 'inbound';
+/** An area in use, with how many of the given tasks are in it. */
+export interface AreaCount {
+  /** How the area is compared (see areaKey). "" for tasks with no area. */
+  key: string;
+  /** How the area is written in the first row that uses it. "" for tasks with no area. */
+  name: string;
+  count: number;
+  /** Of those tasks, the ones that are not done. */
+  notDone: number;
+}
+
+/** The areas the given tasks use, A to Z, then the tasks with no area (only if there are any). */
+export function countByArea(tasks: readonly Task[]): AreaCount[] {
+  const areas = new Map<string, AreaCount>();
+  for (const task of tasks) {
+    const key = areaKey(task.area);
+    const area = areas.get(key) ?? { key, name: task.area, count: 0, notDone: 0 };
+    area.count += 1;
+    if (task.status !== 'done') area.notDone += 1;
+    areas.set(key, area);
+  }
+  const named = [...areas.values()]
+    .filter((area) => area.key !== '')
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.key.localeCompare(b.key));
+  const none = areas.get('');
+  return none ? [...named, none] : named;
+}
+
+/**
+ * The views. "today" and "review" choose their own tasks; "list" and
+ * "deadlines" show every origin; the origin views show one origin each.
+ */
+export type View = 'today' | 'list' | 'deadlines' | 'you-requested' | 'inbound' | 'review';
+
+/** The views with status chips and a sort order: a list of tasks the viewer filters. */
+export function isListView(view: View): boolean {
+  return view !== 'today' && view !== 'review';
+}
 
 /** The origin a view is limited to, or null for the views that show every task. */
 export function viewOrigin(view: View): Origin | null {
